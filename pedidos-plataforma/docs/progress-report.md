@@ -50,11 +50,13 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 9. **Declaración de mayoría de edad obligatoria** al registrarse.
 10. **Nombre de marca y logo:** los definió el responsable; el logo se revisó visualmente solo en captura.
 
-## 5. Hallazgos durante el trabajo (ya corregidos)
+## 5. Hallazgos durante el trabajo
 
 - **Carrito del prototipo:** los botones de cantidad y eliminar no funcionaban (clave con comillas rota en un atributo HTML). Lo detectó la primera prueba E2E.
 - **Falta de RLS** en `provider_account_directory`: la prueba que exige RLS en toda tabla con `tenant_id` lo detectó.
 - **IDOR entre clientes (seguridad):** con contexto de local fijado, la política de seguridad por fila deja ver todos los pedidos del local, de modo que un cliente podía ver o cancelar el pedido de otro adivinando su id. Corregido con verificación explícita de propiedad en `getCustomerOrder` y `transitionOrder`. **Regla para la capa HTTP:** las lecturas del cliente deben pasar su `userId` y las rutas de cliente no deben depender solo de RLS.
+- **Capacidad: posible sobreventa (sin corregir, decisión de producto).** El cupo de pedidos simultáneos cuenta solo pedidos ya pagados y en curso. Muchos pedidos creados a la vez antes de pagar pueden superar el límite al pagarse. Opción: contar como "reservados" los pedidos sin pagar de los últimos N minutos (con el costo de que carritos abandonados bloqueen cupo durante ese lapso).
+- **Idempotencia bajo concurrencia (corregido en el código, sin verificar con carreras reales):** la clave se re-verifica tras tomar el bloqueo del local.
 - Un commit intermedio se subió con una prueba fallando (la de RLS anterior); se corrigió en el commit siguiente.
 
 ## 6. Lo que NO está hecho ni verificado
@@ -63,7 +65,7 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 - **Transporte de tiempo real (SSE/Redis pub/sub):** el consumidor del outbox publica en una interfaz `Realtime` que todavía no tiene implementación; push, email y WhatsApp quedan para después.
 - **Conexión OAuth con Mercado Pago**, creación de la preferencia de pago y obtención de credenciales por local.
 - **El adaptador de Mercado Pago** está escrito de la documentación pública y probado solo con respuestas simuladas. Hay que verificar firma, campos y reembolsos contra el sandbox real, y revisar condiciones y tarifas vigentes.
-- **Concurrencia real:** PGlite usa una conexión; las pruebas de "dos escaneos simultáneos" no ejercitan carrera real. Hay que repetirlas contra PostgreSQL con varias conexiones (servicio en CI).
+- **Concurrencia real: escrita pero NO ejecutada.** PGlite usa una sola conexión, así que las pruebas de carreras no son reales. Escribí `apps/api/test/postgres.integration.test.ts` (10 escaneos simultáneos del mismo QR, 8 pedidos con la misma clave de idempotencia, 20 pedidos con numeración consecutiva, webhook repetido en paralelo, cupo lleno) más el adaptador `pg-database.ts` y el arranque `server.ts`. Intenté correrlas con un PostgreSQL embebido y **no logré inicializarlo en esta máquina Windows** (falla `initdb` en la inicialización posterior, también con `--locale=C`). Quedan como pruebas opcionales (`TEST_DATABASE_URL`) y hay un job de CI con PostgreSQL real, marcado como no bloqueante hasta su primera ejecución. **El adaptador `pg` y `server.ts` nunca se ejecutaron contra un PostgreSQL real**; solo pasan el chequeo de tipos. Al servir carreras de verdad podrían aparecer fallos que PGlite no muestra.
 - **Suscripciones de la plataforma**, panel de super admin, facturación.
 - **Frontends reales**, PWA, notificaciones push.
 - **Pago al retiro** (efectivo y tarjeta física): el esquema lo soporta, la lógica no.

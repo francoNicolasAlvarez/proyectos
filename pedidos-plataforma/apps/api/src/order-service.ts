@@ -62,6 +62,10 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
   if (!tenant || tenant.status !== 'active') throw new DomainError('TENANT_NOT_ACTIVE');
   const settings = (await tx.query<Row>('SELECT * FROM tenant_settings WHERE tenant_id=$1 FOR UPDATE', [tenantId])).rows[0];
   if (!settings) throw new DomainError('TENANT_NOT_CONFIGURED');
+  // Re-verificación de idempotencia ya con el bloqueo tomado: dos solicitudes simultáneas con la misma clave
+  // pasan la primera verificación a la vez, pero acá se serializan y la segunda encuentra el pedido de la primera.
+  const dup2 = (await tx.query<Row>('SELECT id, tenant_id, order_number, total_cents FROM orders WHERE user_id=$1 AND idempotency_key=$2', [userId, input.idempotencyKey])).rows[0];
+  if (dup2) return { orderId: dup2.id, orderNumber: num(dup2.order_number), totalCents: num(dup2.total_cents), replayed: true };
   const method = await tx.query('SELECT 1 FROM tenant_payment_methods WHERE tenant_id=$1 AND method=$2 AND enabled', [tenantId, input.paymentMethod]);
   if (!method.rows.length) throw new DomainError('PAYMENT_METHOD_NOT_AVAILABLE');
 
