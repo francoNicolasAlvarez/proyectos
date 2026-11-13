@@ -10,6 +10,7 @@ import { SESSION_DAYS, authenticate, login, logout, registerUser, roleIn, type A
 import { DomainError, withContext, type Database } from '../db';
 import { setCategoryPaused, setOrderingPaused, setProductAvailable } from '../catalog-admin';
 import { buildCheckout } from '../checkout-service';
+import { createLocation, listLocations, locationQrSvg, qrUrlFor, resolveLocationByToken, rotateLocationQr, updateLocation } from '../locations-admin';
 import { confirmLimitsReviewed, getLimitsReport, updateLimits } from '../limits-service';
 import { resolveTenantBySlug } from '../menu';
 import { listNotifications, markNotificationsRead } from '../notifications';
@@ -50,7 +51,7 @@ const STATUS: Record<string, number> = {
   ORDER_NOT_FOUND: 404, PART_NOT_FOUND: 404, TENANT_NOT_FOUND: 404, TENANT_NOT_ACTIVE: 404, UNKNOWN_ACCOUNT: 404, NO_ACTIVE_MENU: 404,
   EMAIL_TAKEN: 409, ALREADY_USED: 409, IDEMPOTENCY_KEY_REUSED: 409, AMOUNT_MISMATCH: 409,
   PAUSED: 409, CLOSED: 409, CONCURRENT_LIMIT: 409, INTERVAL_LIMIT: 409, PRODUCT_NOT_IN_ACTIVE_MENU: 409,
-  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, PRODUCT_NOT_FOUND: 404, CATEGORY_NOT_FOUND: 404, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
+  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, LOCATION_NOT_FOUND: 404, LOCATION_NAME_TAKEN: 409, PRODUCT_NOT_FOUND: 404, CATEGORY_NOT_FOUND: 404, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
   ORDER_NOT_PAYABLE: 409, PAYMENT_WINDOW_EXPIRED: 409, PAYMENT_ACCOUNT_NOT_CONNECTED: 409,
 };
 
@@ -259,6 +260,45 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
     const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'orders.deliver');
     const b = schemas.redeem.parse(req.body);
     return withContext(cfg.db, ctx, (tx) => redeemPickup(tx, { tenantId: tenant.id, staffUserId: user.id, token: b.token, shortCode: b.shortCode }));
+  });
+
+  /* ---------- sectores de origen y sus QR ---------- */
+  // Público: el cliente escanea un QR y la app consulta a qué sector corresponde para precargar el origen (informativo).
+  app.get('/venues/:slug/locations/by-token/:token', async (req) => {
+    const t = await tenantOf((req.params as { slug: string }).slug);
+    const token = z.string().regex(/^[a-f0-9]{64}$/).parse((req.params as { token: string }).token);
+    const loc = await withContext(cfg.db, { tenantId: t.id, role }, (tx) => resolveLocationByToken(tx, t.id, token));
+    if (!loc) throw new DomainError('LOCATION_NOT_FOUND');
+    return loc;
+  });
+  const qrUrlOf = (slug: string) => qrUrlFor(cfg.appBaseUrl, slug);
+  app.get('/venues/:slug/staff/locations', async (req) => {
+    const slug = (req.params as { slug: string }).slug;
+    const { tenant, ctx } = await staff(req, slug, 'locations.manage');
+    return withContext(cfg.db, ctx, (tx) => listLocations(tx, tenant.id, qrUrlOf(slug)));
+  });
+  app.post('/venues/:slug/staff/locations', async (req, reply) => {
+    const slug = (req.params as { slug: string }).slug;
+    const { tenant, user, ctx } = await staff(req, slug, 'locations.manage');
+    const b = z.object({ name: z.string().min(1).max(60), kind: z.enum(['table', 'bar', 'sector', 'other']).default('sector') }).strict().parse(req.body);
+    return reply.code(201).send(await withContext(cfg.db, ctx, (tx) => createLocation(tx, { tenantId: tenant.id, actorUserId: user.id, ...b }, qrUrlOf(slug))));
+  });
+  app.put('/venues/:slug/staff/locations/:id', async (req) => {
+    const slug = (req.params as { slug: string }).slug;
+    const { tenant, user, ctx } = await staff(req, slug, 'locations.manage');
+    const b = z.object({ name: z.string().min(1).max(60).optional(), active: z.boolean().optional() }).strict().parse(req.body);
+    return withContext(cfg.db, ctx, (tx) => updateLocation(tx, { tenantId: tenant.id, actorUserId: user.id, id: idParam(req), ...b }, qrUrlOf(slug)));
+  });
+  app.post('/venues/:slug/staff/locations/:id/rotate-qr', async (req) => {
+    const slug = (req.params as { slug: string }).slug;
+    const { tenant, user, ctx } = await staff(req, slug, 'locations.manage');
+    return withContext(cfg.db, ctx, (tx) => rotateLocationQr(tx, { tenantId: tenant.id, actorUserId: user.id, id: idParam(req) }, qrUrlOf(slug)));
+  });
+  app.get('/venues/:slug/staff/locations/:id/qr.svg', async (req, reply) => {
+    const slug = (req.params as { slug: string }).slug;
+    const { tenant, ctx } = await staff(req, slug, 'locations.manage');
+    const svg = await withContext(cfg.db, ctx, (tx) => locationQrSvg(tx, tenant.id, idParam(req), qrUrlOf(slug)));
+    return reply.type('image/svg+xml').header('Cache-Control', 'no-store').send(svg);
   });
 
   /* ---------- control operativo rápido: agotar productos, pausar categorías y pausar pedidos ---------- */
