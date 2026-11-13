@@ -626,6 +626,13 @@ END $$;
 -- Tokens de retiro: el cliente puede LEER los de sus pedidos (para mostrar su QR); nunca modificarlos.
 CREATE POLICY customer_read ON pickup_tokens FOR SELECT USING (order_part_id IN (SELECT id FROM order_parts));
 
+-- Directorio de cuentas del proveedor: lectura abierta (el webhook llega sin contexto de local),
+-- escritura solo del local dueño de la fila.
+ALTER TABLE provider_account_directory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE provider_account_directory FORCE ROW LEVEL SECURITY;
+CREATE POLICY directory_read ON provider_account_directory FOR SELECT USING (true);
+CREATE POLICY directory_write ON provider_account_directory USING (tenant_id = app_tenant() OR app_is_admin()) WITH CHECK (tenant_id = app_tenant() OR app_is_admin());
+
 -- Pedidos: el local los ve por tenant; el cliente, los suyos en todos los locales.
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders FORCE ROW LEVEL SECURITY;

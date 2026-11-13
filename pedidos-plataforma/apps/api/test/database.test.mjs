@@ -270,3 +270,16 @@ describe('auditoría e historial de solo inserción', () => {
     await assert.rejects(asApp({ tenant: ids.tA }, (tx) => tx.query("INSERT INTO cancellation_reasons VALUES ('x', 'x')")), /permission denied/i);
   });
 });
+
+describe('directorio de cuentas del proveedor', () => {
+  test('cualquiera puede resolver la cuenta (lectura abierta) pero un local no puede escribir filas de otro', async () => {
+    await db.query("INSERT INTO tenant_payment_accounts (tenant_id, provider, provider_account_id, access_token_enc) VALUES ($1,'mercadopago','ACC-A','x')", [ids.tA]);
+    const open = await asApp({}, (tx) => tx.query("SELECT tenant_id FROM provider_account_directory WHERE provider_account_id = 'ACC-A'"));
+    assert.equal(open.rows[0].tenant_id, ids.tA);
+    await assert.rejects(
+      asApp({ tenant: ids.tB }, (tx) => tx.query("INSERT INTO provider_account_directory VALUES ('mercadopago','ACC-FAKE',$1)", [ids.tA])),
+      /row-level security/i);
+    const upd = await asApp({ tenant: ids.tB }, (tx) => tx.query("UPDATE provider_account_directory SET tenant_id = $1 WHERE provider_account_id = 'ACC-A'", [ids.tB]));
+    assert.equal(upd.affectedRows, 0);
+  });
+});
