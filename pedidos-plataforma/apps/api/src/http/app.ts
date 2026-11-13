@@ -13,6 +13,7 @@ import { buildCheckout } from '../checkout-service';
 import { createLocation, listLocations, locationQrSvg, qrUrlFor, resolveLocationByToken, rotateLocationQr, updateLocation } from '../locations-admin';
 import { confirmLimitsReviewed, getLimitsReport, updateLimits } from '../limits-service';
 import { resolveTenantBySlug } from '../menu';
+import { createPickupPoint, listPickupPoints, updatePickupPoint } from '../pickup-points-admin';
 import { listNotifications, markNotificationsRead } from '../notifications';
 import { createOrder, markPartReady, redeemPickup, transitionOrder } from '../order-service';
 import type { InMemoryHub } from '../realtime';
@@ -51,7 +52,7 @@ const STATUS: Record<string, number> = {
   ORDER_NOT_FOUND: 404, PART_NOT_FOUND: 404, TENANT_NOT_FOUND: 404, TENANT_NOT_ACTIVE: 404, UNKNOWN_ACCOUNT: 404, NO_ACTIVE_MENU: 404,
   EMAIL_TAKEN: 409, ALREADY_USED: 409, IDEMPOTENCY_KEY_REUSED: 409, AMOUNT_MISMATCH: 409,
   PAUSED: 409, CLOSED: 409, CONCURRENT_LIMIT: 409, INTERVAL_LIMIT: 409, PRODUCT_NOT_IN_ACTIVE_MENU: 409,
-  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, LOCATION_NOT_FOUND: 404, LOCATION_NAME_TAKEN: 409, PRODUCT_NOT_FOUND: 404, CATEGORY_NOT_FOUND: 404, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
+  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, PICKUP_POINT_NOT_FOUND: 404, POINT_NAME_TAKEN: 409, DEFAULT_POINT_CANNOT_BE_DEACTIVATED: 409, DEFAULT_POINT_REQUIRED: 409, LOCATION_NOT_FOUND: 404, LOCATION_NAME_TAKEN: 409, PRODUCT_NOT_FOUND: 404, CATEGORY_NOT_FOUND: 404, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
   ORDER_NOT_PAYABLE: 409, PAYMENT_WINDOW_EXPIRED: 409, PAYMENT_ACCOUNT_NOT_CONNECTED: 409,
 };
 
@@ -299,6 +300,22 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
     const { tenant, ctx } = await staff(req, slug, 'locations.manage');
     const svg = await withContext(cfg.db, ctx, (tx) => locationQrSvg(tx, tenant.id, idParam(req), qrUrlOf(slug)));
     return reply.type('image/svg+xml').header('Cache-Control', 'no-store').send(svg);
+  });
+
+  /* ---------- puntos de retiro ---------- */
+  app.get('/venues/:slug/staff/pickup-points', async (req) => {
+    const { tenant, ctx } = await staff(req, (req.params as { slug: string }).slug, 'locations.manage');
+    return withContext(cfg.db, ctx, (tx) => listPickupPoints(tx, tenant.id));
+  });
+  app.post('/venues/:slug/staff/pickup-points', async (req, reply) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'locations.manage');
+    const b = z.object({ name: z.string().min(1).max(60), description: z.string().max(200).nullish(), makeDefault: z.boolean().optional() }).strict().parse(req.body);
+    return reply.code(201).send(await withContext(cfg.db, ctx, (tx) => createPickupPoint(tx, { tenantId: tenant.id, actorUserId: user.id, ...b })));
+  });
+  app.put('/venues/:slug/staff/pickup-points/:id', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'locations.manage');
+    const b = z.object({ name: z.string().min(1).max(60).optional(), description: z.string().max(200).nullish(), active: z.boolean().optional(), isDefault: z.boolean().optional() }).strict().parse(req.body);
+    return withContext(cfg.db, ctx, (tx) => updatePickupPoint(tx, { tenantId: tenant.id, actorUserId: user.id, id: idParam(req), ...b }));
   });
 
   /* ---------- control operativo rápido: agotar productos, pausar categorías y pausar pedidos ---------- */
