@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#3451D1">
+  <title>Pasamanos · Prototipo cliente</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="demo-bar" role="region" aria-label="Controles de demostración">
+    <strong>Prototipo</strong>
+    <button data-a="demo-next">Avanzar estado</button>
+    <button data-a="demo-reject">Simular rechazo</button>
+    <button data-a="demo-theme">Color del local</button>
+    <button data-a="demo-reset">Reiniciar</button>
+  </div>
+  <div class="phone">
+    <main id="app"></main>
+  </div>
+  <div id="sheet"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

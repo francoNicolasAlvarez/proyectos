@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Pasamanos">
+  <defs>
+    <linearGradient id="pm-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3451D1"/>
+      <stop offset="1" stop-color="#6741D9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#pm-grad)"/>
+  <g fill="#fff" stroke="#fff" transform="translate(0 4)">
+    <!-- persona: cabeza y torso -->
+    <circle cx="24" cy="22" r="6" stroke="none"/>
+    <path d="M14 50v-6a10 10 0 0 1 20 0v6z" stroke="none"/>
+    <!-- brazo levantado -->
+    <path d="M32 38 45.5 25" fill="none" stroke-width="4" stroke-linecap="round"/>
+    <!-- plato con cúpula -->
+    <path d="M36 22h19" fill="none" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M39 22a6.5 6.5 0 0 1 13 0z" stroke="none"/>
+    <circle cx="45.5" cy="14.5" r="1.6" stroke="none"/>
+  </g>
+</svg>
