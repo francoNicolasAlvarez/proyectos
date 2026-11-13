@@ -5,7 +5,7 @@
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
-import { CANCELLATION_REASONS, InvalidTransitionError, PricingError, can, type Action } from '@pasamanos/shared';
+import { CANCELLATION_REASONS, InvalidTransitionError, OrderLimitError, PricingError, can, type Action } from '@pasamanos/shared';
 import { SESSION_DAYS, authenticate, login, logout, registerUser, roleIn, type AuthUser } from '../auth';
 import { DomainError, withContext, type Database } from '../db';
 import { resolveTenantBySlug } from '../menu';
@@ -71,6 +71,7 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
   /* ---------- errores ---------- */
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError) return reply.code(400).send({ code: 'VALIDATION', issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
+    if (err instanceof OrderLimitError) return reply.code(422).send({ code: err.code, violations: err.violations, usage: err.usage });
     if (err instanceof PricingError) return reply.code(422).send({ code: err.code, productId: err.productId ?? null });
     if (err instanceof InvalidTransitionError) return reply.code(409).send({ code: 'INVALID_TRANSITION' });
     if (err instanceof DomainError) return reply.code(STATUS[err.code] ?? 422).send({ code: err.code });

@@ -47,6 +47,12 @@ const PRODUCTS = [
     price: 12900, prep: 12, point: 'comida', available: true, groups: [BEERS('beer1', 'Cerveza 1'), BEERS('beer2', 'Cerveza 2')] },
 ];
 
+/* Límites por pedido (configurables por local en el producto real): $100.000, 20 productos individuales u 8 combos.
+   Un combo equivale a 20/8 = 2,5 productos, así que se pueden mezclar. */
+const LIMITS = { maxTotal: 100000, maxIndividual: 20, maxCombos: 8 };
+const fmtNum = (n) => new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n);
+const isCombo = (p) => p.cat === 'combo';
+
 const state = { view: 'menu', cat: 'beer', cart: [], origin: 'Mesa 5', sheet: null, order: null, pay: 'mp', theme: 0, paused: false };
 let flowToken = 0;
 let toastTimer = null;
@@ -69,6 +75,32 @@ function selText(p, sel) {
   return out.join(' · ');
 }
 const cartCount = () => state.cart.reduce((a, l) => a + l.qty, 0);
+function usage() {
+  let individual = 0, combos = 0;
+  for (const l of state.cart) { if (isCombo(prod(l.pid))) combos += l.qty; else individual += l.qty; }
+  const equivalent = individual + combos * (LIMITS.maxIndividual / LIMITS.maxCombos);
+  const total = cartTotal();
+  return { individual, combos, equivalent, total, totalOk: total <= LIMITS.maxTotal, itemsOk: equivalent <= LIMITS.maxIndividual };
+}
+const limitsOk = () => { const u = usage(); return u.totalOk && u.itemsOk; };
+
+/* Lista de requisitos al estilo de las contraseñas: cada línea muestra ✓ o ✕ y se actualiza al cambiar el carrito. */
+function limitsBox() {
+  const u = usage();
+  const mix = [u.individual ? `${u.individual} producto${u.individual === 1 ? '' : 's'}` : '', u.combos ? `${u.combos} combo${u.combos === 1 ? '' : 's'}` : ''].filter(Boolean).join(' y ');
+  const line = (ok, title, detail) => `<li class="${ok ? 'ok' : 'bad'}"><span class="mark" aria-hidden="true">${ok ? '✓' : '✕'}</span><span><strong>${title}</strong><small>${detail}</small></span><span class="sr-only">${ok ? 'Cumple' : 'No cumple'}</span></li>`;
+  const msgs = [];
+  if (!u.totalOk) msgs.push(`El total no puede superar ${fmt(LIMITS.maxTotal)}. El tuyo es ${fmt(u.total)}: quitá productos por ${fmt(u.total - LIMITS.maxTotal)} o más para continuar.`);
+  if (!u.itemsOk) msgs.push(`Superás el máximo de ${LIMITS.maxIndividual} productos o ${LIMITS.maxCombos} combos por pedido (un combo equivale a ${fmtNum(LIMITS.maxIndividual / LIMITS.maxCombos)} productos). Llevás el equivalente a ${fmtNum(u.equivalent)}: quitá el equivalente a ${fmtNum(u.equivalent - LIMITS.maxIndividual)} o más.`);
+  return `<section class="limits" aria-label="Límites del pedido">
+    <h3>Límites del pedido</h3>
+    <ul>
+      ${line(u.totalOk, `Total hasta ${fmt(LIMITS.maxTotal)}`, `Tu total: ${fmt(u.total)}`)}
+      ${line(u.itemsOk, `Hasta ${LIMITS.maxIndividual} productos o ${LIMITS.maxCombos} combos`, `Llevás ${mix || 'nada todavía'} (equivale a ${fmtNum(u.equivalent)})`)}
+    </ul>
+    ${msgs.length ? `<div class="notice error" role="alert">${msgs.map((m) => `<span>${m}</span>`).join('<br>')}</div>` : ''}
+  </section>`;
+}
 const cartTotal = () => state.cart.reduce((a, l) => a + l.qty * unitPrice(prod(l.pid), l.sel), 0);
 // Clave segura para usar dentro de atributos HTML (solo letras, números y separadores simples).
 const lineKey = (pid, sel) => [pid, ...Object.keys(sel).sort().map((k) => `${k}-${[...sel[k]].sort().join('_')}`)].join('~');
@@ -139,7 +171,7 @@ function viewMenu() {
       </article>`).join('')}
   </section>
   <footer class="footer-brand"><img src="../../../../packages/ui/assets/logo-mark.svg" alt=""> Hecho con Pasamanos</footer>
-  ${cartCount() ? `<button class="cartbar" data-a="go-cart"><span>Ver carrito (${cartCount()})</span><span>${fmt(cartTotal())}</span></button>` : ''}`;
+  ${cartCount() ? `<button class="cartbar${limitsOk() ? '' : ' over'}" data-a="go-cart"><span>${limitsOk() ? '' : '⚠ '}Ver carrito (${cartCount()})</span><span>${fmt(cartTotal())}</span></button>` : ''}`;
 }
 
 function viewCart() {
@@ -165,12 +197,13 @@ function viewCart() {
       ${items}
       <div class="notice pickup" style="margin-top:16px">🛍️ <span>${pickupMsg}</span></div>
       ${state.origin ? `<p class="muted">Origen del pedido: ${state.origin} (solo informativo)</p>` : ''}
+      ${limitsBox()}
       <div class="totals">
         <div><span>Subtotal</span><span>${fmt(cartTotal())}</span></div>
         <div class="grand"><span>Total</span><span>${fmt(cartTotal())}</span></div>
       </div>
       <p></p>
-      <button class="btn" data-a="go-pay" ${state.paused ? 'disabled' : ''}>${state.paused ? 'Pedidos pausados' : 'Continuar al pago'}</button>`
+      <button class="btn" data-a="go-pay" ${state.paused || !limitsOk() ? 'disabled' : ''}>${state.paused ? 'Pedidos pausados' : !limitsOk() ? 'Revisá los límites del pedido' : 'Continuar al pago'}</button>`
       : `<div class="center" style="padding:48px 0"><p>Tu carrito está vacío.</p><button class="btn secondary" data-a="go-menu">Ver el menú</button></div>`}
   </div>`;
 }
@@ -314,7 +347,7 @@ Store.onChange((d) => {
 });
 
 function startPayment() {
-  if (state.paused) return;
+  if (state.paused || !limitsOk()) return;   // el servidor vuelve a validar los límites: esto es solo la ayuda en pantalla
   const token = ++flowToken;
   state.view = 'paying';
   render();
@@ -340,7 +373,7 @@ const actions = {
   cat: (d) => { state.cat = d.v; },
   open: (d) => {
     const p = prod(d.v);
-    if (!p.groups.length) { addToCart(p.id, {}, 1); toast(`${p.name} agregado`); } else state.sheet = { kind: 'product', pid: p.id, sel: {}, qty: 1 };
+    if (!p.groups.length) { addToCart(p.id, {}, 1); toast(limitsOk() ? `${p.name} agregado` : 'Tu pedido supera el límite: revisalo en el carrito'); } else state.sheet = { kind: 'product', pid: p.id, sel: {}, qty: 1 };
   },
   opt: (d) => {
     const s = state.sheet, p = prod(s.pid), g = p.groups.find((x) => x.id === d.g);
@@ -352,13 +385,13 @@ const actions = {
   },
   'sheet-inc': () => { state.sheet.qty = Math.min(20, state.sheet.qty + 1); },
   'sheet-dec': () => { state.sheet.qty = Math.max(1, state.sheet.qty - 1); },
-  'sheet-add': () => { const s = state.sheet; addToCart(s.pid, s.sel, s.qty); toast(`${prod(s.pid).name} agregado`); state.sheet = null; },
+  'sheet-add': () => { const s = state.sheet; addToCart(s.pid, s.sel, s.qty); toast(limitsOk() ? `${prod(s.pid).name} agregado` : 'Tu pedido supera el límite: revisalo en el carrito'); state.sheet = null; },
   'close-sheet': () => { state.sheet = null; },
   'origin-open': () => { state.sheet = { kind: 'origin' }; },
   'origin-set': (d) => { state.origin = d.v || null; state.sheet = null; },
   'go-menu': () => { state.view = 'menu'; },
   'go-cart': () => { state.view = 'cart'; },
-  'go-pay': () => { state.view = 'pay'; },
+  'go-pay': () => { if (limitsOk() && !state.paused) state.view = 'pay'; },
   'go-tracking': () => { state.view = 'tracking'; },
   inc: (d) => { state.cart.find((l) => l.key === d.k).qty++; },
   dec: (d) => { const l = state.cart.find((x) => x.key === d.k); if (l.qty > 1) l.qty--; },

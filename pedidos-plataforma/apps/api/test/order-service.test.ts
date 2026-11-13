@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { InvalidTransitionError, PricingError } from '@pasamanos/shared';
+import { InvalidTransitionError, OrderLimitError, PricingError } from '@pasamanos/shared';
 import { DomainError, withContext, type Database, type RequestContext } from '../src/db';
 import {
   createOrder, getPickupCredentials, markPartReady, markPaymentApproved, redeemPickup, transitionOrder,
@@ -470,6 +470,61 @@ describe('preparación y retiro con QR', () => {
     expect(h.filter((x) => x.axis === 'operational').map((x) => x.to_status)).toEqual(
       ['awaiting_payment', 'pending_acceptance', 'accepted', 'preparing', 'ready', 'delivered']);
     expect(h.find((x) => x.axis === 'payment')).toMatchObject({ to_status: 'approved', actor_kind: 'provider' });
+  });
+});
+
+describe('límites por pedido (gasto y cantidad)', () => {
+  const limitErr = async (p: Promise<unknown>) => { try { await p; } catch (e) { return e as OrderLimitError; } return null; };
+  const orders = async (s: Seed) => Number((await one('SELECT count(*)::int n FROM orders WHERE tenant_id=$1', [s.id])).n);
+
+  it('un pedido de exactamente $100.000 se acepta y uno de más se rechaza sin crear nada', async () => {
+    const s = await seedTenant();
+    await pg.query('UPDATE products SET base_price_cents = 1000000 WHERE id=$1', [s.fries]);     // $10.000 c/u
+    expect((await place(s, [friesLine(s, 10)])).totalCents).toBe(10_000_000);                      // exactamente $100.000
+    const before = await orders(s);
+    await pg.query('UPDATE products SET base_price_cents = 1000001 WHERE id=$1', [s.fries]);     // $10.000,01 c/u
+    const e = await limitErr(place(s, [friesLine(s, 10)]));
+    expect(e).toBeInstanceOf(OrderLimitError);
+    expect(e?.violations).toEqual([{ code: 'ORDER_TOTAL_LIMIT_EXCEEDED', limit: 10_000_000, actual: 10_000_010 }]);
+    expect(await orders(s)).toBe(before);                                                         // no se creó ningún pedido
+  });
+
+  it('20 productos individuales se aceptan y 21 no (repartidos en varias líneas)', async () => {
+    const s = await seedTenant();
+    await pg.query('UPDATE products SET base_price_cents = 1000 WHERE tenant_id=$1', [s.id]);   // baratos: solo importa la cantidad
+    const lines = (a: number, b: number) => [friesLine(s, a), { productId: s.lemonade, quantity: b, selections: {} }];
+    expect((await place(s, lines(10, 10))).orderNumber).toBe(1);
+    const e = await limitErr(place(s, lines(10, 11)));
+    expect(e?.violations).toEqual([{ code: 'ORDER_ITEM_LIMIT_EXCEEDED', limit: 20, actual: 21 }]);
+  });
+
+  it('8 combos se aceptan y 9 no; mezclar cuenta cada combo como 2,5 productos', async () => {
+    const s = await seedTenant();
+    await pg.query("UPDATE products SET base_price_cents = 1000, kind = 'combo' WHERE id=$1", [s.lemonade]);
+    await pg.query('UPDATE products SET base_price_cents = 1000 WHERE id=$1', [s.fries]);
+    const combo = (n: number) => ({ productId: s.lemonade, quantity: n, selections: {} });
+    expect((await place(s, [combo(8)])).orderNumber).toBe(1);
+    expect((await limitErr(place(s, [combo(9)])))?.code).toBe('ORDER_ITEM_LIMIT_EXCEEDED');
+    expect((await place(s, [combo(5), friesLine(s, 7)])).orderNumber).toBe(2);                   // 12,5 + 7 = 19,5
+    expect((await limitErr(place(s, [combo(5), friesLine(s, 8)])))?.violations[0]).toMatchObject({ actual: 20.5 });
+  });
+
+  it('cada local define sus propios límites', async () => {
+    const strict = await seedTenant({ settings: 'max_order_total_cents = 1000000, max_individual_items = 2, max_combos = 1' });   // $10.000, 2 productos
+    expect((await place(strict, [friesLine(strict, 1)])).totalCents).toBe(520_000);                              // $5.200 entra
+    expect((await limitErr(place(strict, [friesLine(strict, 2)])))?.code).toBe('ORDER_TOTAL_LIMIT_EXCEEDED');   // $10.400 supera los $10.000
+    // 3 limonadas ($9.600) cumplen el gasto pero superan los 2 productos permitidos en este local
+    const e = await limitErr(place(strict, [{ productId: strict.lemonade, quantity: 3, selections: {} }]));
+    expect(e?.violations).toEqual([{ code: 'ORDER_ITEM_LIMIT_EXCEEDED', limit: 2, actual: 3 }]);
+    const wide = await seedTenant({ settings: 'max_order_total_cents = 100000000, max_individual_items = 60' });
+    expect((await place(wide, [friesLine(wide, 50)])).totalCents).toBe(50 * 520_000);
+  });
+
+  it('el límite se valida contra el precio real del catálogo, incluidos los extras', async () => {
+    const s = await seedTenant({ settings: 'max_order_total_cents = 1500000' });                 // $15.000
+    await pg.query("UPDATE options SET price_delta_cents = 700000 WHERE name = 'Jarra' AND tenant_id = $1", [s.id]);
+    expect(await limitErr(place(s, [beerLine(s, 1, 'liter')]))).toBeNull();                      // 4.200 + 7.000 = 11.200
+    expect((await limitErr(place(s, [beerLine(s, 2, 'liter')])))?.code).toBe('ORDER_TOTAL_LIMIT_EXCEEDED');
   });
 });
 

@@ -217,3 +217,96 @@ test.describe('Marca del local', () => {
     await expect(page.getByRole('button', { name: /Ver carrito/ })).toHaveCount(0);
   });
 });
+
+test.describe('Límites del pedido ($100.000, 20 productos u 8 combos)', () => {
+  async function addCombo(page) {
+    await page.getByRole('button', { name: 'Combos' }).click();
+    await page.getByRole('button', { name: 'Agregar Combo 3' }).click();
+    await page.getByRole('radio', { name: 'Rubia' }).first().click();
+    await page.getByRole('radio', { name: 'Rubia' }).last().click();
+    await page.getByRole('button', { name: /^Agregar ·/ }).click();
+  }
+  async function addBeer(page) {
+    await page.getByRole('button', { name: 'Cervezas' }).click();
+    await addWithOption(page, 'Rubia Lager', /Pinta/);
+  }
+  async function setQty(page, productName, qty) {
+    const group = page.getByRole('group', { name: `Cantidad de ${productName}` });
+    const current = Number((await group.locator('span').textContent()).trim());
+    const button = group.getByRole('button', { name: qty > current ? 'Agregar uno' : 'Quitar uno' });
+    for (let i = 0; i < Math.abs(qty - current); i++) await button.click();
+  }
+  const rows = (page) => page.locator('.limits li');
+  const pay = (page) => page.getByRole('button', { name: /Continuar al pago|Revisá los límites/ });
+
+  test('la lista de requisitos muestra ✓ mientras el pedido cumple', async ({ page }) => {
+    await addBeer(page);
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await expect(page.getByRole('region', { name: 'Límites del pedido' })).toBeVisible();
+    await expect(rows(page).nth(0)).toHaveClass(/ok/);
+    await expect(rows(page).nth(1)).toHaveClass(/ok/);
+    await expect(rows(page).nth(1)).toContainText('Hasta 20 productos o 8 combos');
+    await expect(page.locator('.limits [role="alert"]')).toHaveCount(0);
+    await expect(pay(page)).toHaveText('Continuar al pago');
+  });
+
+  test('7 combos entran; el octavo supera los $100.000 y bloquea el pago', async ({ page }) => {
+    await addCombo(page);
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await setQty(page, 'Combo 3', 7);                                    // 7 × $12.900 = $90.300
+    await expect(rows(page).nth(0)).toHaveClass(/ok/);
+    await expect(pay(page)).toBeEnabled();
+
+    await setQty(page, 'Combo 3', 8);                                    // $103.200: 8 combos cumplen la cantidad pero no el gasto
+    await expect(rows(page).nth(0)).toHaveClass(/bad/);
+    await expect(rows(page).nth(1)).toHaveClass(/ok/);
+    const alert = page.locator('.limits [role="alert"]');
+    await expect(alert).toContainText('El total no puede superar');
+    await expect(alert).toContainText(/3\.200/);                         // cuánto hay que quitar
+    await expect(pay(page)).toBeDisabled();
+    await expect(pay(page)).toHaveText('Revisá los límites del pedido');
+
+    await setQty(page, 'Combo 3', 7);                                    // al corregirlo, el aviso desaparece
+    await expect(page.locator('.limits [role="alert"]')).toHaveCount(0);
+    await expect(pay(page)).toBeEnabled();
+  });
+
+  test('20 productos entran; el 21 supera la cantidad aunque el gasto esté bien', async ({ page }) => {
+    await addBeer(page);
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await setQty(page, 'Rubia Lager', 20);                               // 20 × $4.200 = $84.000
+    await expect(rows(page).nth(1)).toHaveClass(/ok/);
+    await expect(pay(page)).toBeEnabled();
+
+    await setQty(page, 'Rubia Lager', 21);                               // $88.200: el gasto sigue bien
+    await expect(rows(page).nth(0)).toHaveClass(/ok/);
+    await expect(rows(page).nth(1)).toHaveClass(/bad/);
+    await expect(page.locator('.limits [role="alert"]')).toContainText('Superás el máximo de 20 productos o 8 combos');
+    await expect(pay(page)).toBeDisabled();
+  });
+
+  test('mezclar: un combo equivale a 2,5 productos', async ({ page }) => {
+    await addCombo(page);
+    await addBeer(page);
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await setQty(page, 'Combo 3', 5);
+    await setQty(page, 'Rubia Lager', 7);                                // 12,5 + 7 = 19,5 · gasto $64.500 + $29.400
+    await expect(rows(page).nth(1)).toContainText('equivale a 19,5');
+    await expect(pay(page)).toBeEnabled();
+
+    await setQty(page, 'Rubia Lager', 8);                                // 20,5
+    await expect(rows(page).nth(1)).toHaveClass(/bad/);
+    await expect(rows(page).nth(1)).toContainText('equivale a 20,5');
+    await expect(page.locator('.limits [role="alert"]')).toContainText('equivalente a 20,5');
+    await expect(pay(page)).toBeDisabled();
+  });
+
+  test('la barra de carrito del menú avisa cuando se supera un límite', async ({ page }) => {
+    await addBeer(page);
+    await expect(page.locator('.cartbar.over')).toHaveCount(0);
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await setQty(page, 'Rubia Lager', 21);
+    await page.getByRole('button', { name: 'Volver al menú' }).click();
+    await expect(page.locator('.cartbar.over')).toContainText('⚠');
+  });
+});

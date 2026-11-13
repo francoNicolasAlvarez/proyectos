@@ -9,18 +9,20 @@ type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-exp
 
 export interface PublicMenu {
   menuId: string; eventId: string | null; paused: boolean; pauseMessage: string | null;
+  /** Límites por pedido del local, para que la pantalla avise antes de pagar. */
+  limits: { maxTotalCents: number; maxIndividualItems: number; maxCombos: number };
   categories: { id: string; name: string; paused: boolean; products: PublicProduct[] }[];
 }
 export interface PublicProduct {
   id: string; name: string; description: string | null; ingredients: string | null; imageUrl: string | null;
-  priceCents: number; prepMinutes: number; available: boolean;
+  priceCents: number; prepMinutes: number; available: boolean; kind: 'simple' | 'combo';
   groups: { id: string; name: string; min: number; max: number; options: { id: string; name: string; priceDeltaCents: number; available: boolean }[] }[];
 }
 
 export async function getPublicMenu(tx: Queryable, tenantId: string, now?: Date): Promise<PublicMenu> {
   const active = await resolveActiveMenu(tx, tenantId, now);
   if (!active) throw new DomainError('NO_ACTIVE_MENU');
-  const settings = (await tx.query<Row>('SELECT ordering_paused, pause_message FROM tenant_settings WHERE tenant_id = $1', [tenantId])).rows[0];
+  const settings = (await tx.query<Row>('SELECT ordering_paused, pause_message, max_order_total_cents, max_individual_items, max_combos FROM tenant_settings WHERE tenant_id = $1', [tenantId])).rows[0];
   const cats = (await tx.query<Row>('SELECT id, name, paused FROM categories WHERE tenant_id=$1 AND menu_id=$2 AND archived_at IS NULL ORDER BY sort_order, name', [tenantId, active.menuId])).rows;
   const prods = (await tx.query<Row>(
     `SELECT p.* FROM products p JOIN categories c ON c.tenant_id = p.tenant_id AND c.id = p.category_id
@@ -43,12 +45,15 @@ export async function getPublicMenu(tx: Queryable, tenantId: string, now?: Date)
   };
   return {
     menuId: active.menuId, eventId: active.eventId, paused: !!settings?.ordering_paused, pauseMessage: settings?.pause_message ?? null,
+    limits: {
+      maxTotalCents: num(settings?.max_order_total_cents ?? 10_000_000), maxIndividualItems: num(settings?.max_individual_items ?? 20), maxCombos: num(settings?.max_combos ?? 8),
+    },
     categories: cats.map((c) => ({
       id: c.id, name: c.name, paused: c.paused,
       products: prods.filter((p) => p.category_id === c.id).map((p) => ({
         id: p.id, name: p.name, description: p.description, ingredients: p.ingredients, imageUrl: p.image_url,
         priceCents: num(p.base_price_cents), prepMinutes: num(p.prep_minutes),
-        available: p.available && !c.paused, groups: groupsOf(p.id),
+        available: p.available && !c.paused, kind: p.kind === 'combo' ? 'combo' : 'simple', groups: groupsOf(p.id),
       })),
     })),
   };

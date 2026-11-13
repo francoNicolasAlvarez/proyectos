@@ -137,6 +137,10 @@ CREATE TABLE tenant_settings (
   pickup_deadline_minutes integer CHECK (pickup_deadline_minutes > 0),
   default_prep_minutes integer NOT NULL DEFAULT 10 CHECK (default_prep_minutes >= 0),
   id_check_on_pickup boolean NOT NULL DEFAULT false,
+  -- Límites por pedido: gasto máximo (centavos) y cantidad (productos individuales; los combos equivalen a maxIndividual/maxCombos).
+  max_order_total_cents bigint NOT NULL DEFAULT 10000000 CHECK (max_order_total_cents > 0),
+  max_individual_items integer NOT NULL DEFAULT 20 CHECK (max_individual_items > 0),
+  max_combos integer NOT NULL DEFAULT 8 CHECK (max_combos > 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

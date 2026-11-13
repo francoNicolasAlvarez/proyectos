@@ -214,3 +214,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .spinner { animation: none; }
   #toast { transition: none; }
 }
+
+/* Límites del pedido: lista de requisitos con ✓ / ✕ */
+.limits { margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.limits h3 { margin: 0 0 8px; font-size: 14px; }
+.limits ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.limits li { display: flex; gap: 10px; align-items: flex-start; }
+.limits li small { display: block; color: var(--muted); }
+.limits .mark { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; flex: none; }
+.limits li.ok .mark { background: var(--ok-bg); color: var(--ok); }
+.limits li.bad .mark { background: var(--err-bg); color: var(--err); }
+.limits li.bad strong { color: var(--err); }
+.limits .notice { margin-top: 10px; display: block; }
+.cartbar.over { background: #b3261e; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

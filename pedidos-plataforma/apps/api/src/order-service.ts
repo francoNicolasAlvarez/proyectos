@@ -92,7 +92,7 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
   const ids = [...new Set(input.items.map((i) => i.productId))];
   const prodRows = ids.length ? (await tx.query<Row>(
     `SELECT p.id, p.name, p.base_price_cents, p.available, p.archived_at, p.prep_minutes, p.pickup_point_id,
-            c.paused AS category_paused, c.pickup_point_id AS category_point, c.menu_id
+            c.paused AS category_paused, c.pickup_point_id AS category_point, c.menu_id, p.kind
      FROM products p JOIN categories c ON c.tenant_id = p.tenant_id AND c.id = p.category_id
      WHERE p.tenant_id=$1 AND p.id IN (${placeholders(2, ids.length)})`, [tenantId, ...ids])).rows : [];
   const optRows = ids.length ? (await tx.query<Row>(
@@ -112,7 +112,7 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
     }
     catalog.set(p.id, {
       id: p.id, name: p.name, basePriceCents: num(p.base_price_cents), available: p.available, archived: p.archived_at != null,
-      categoryPaused: p.category_paused, prepMinutes: num(p.prep_minutes), groups: [...groups.values()],
+      categoryPaused: p.category_paused, prepMinutes: num(p.prep_minutes), kind: p.kind === 'combo' ? 'combo' : 'simple', groups: [...groups.values()],
     });
     pickupByProduct.set(p.id, p.pickup_point_id ?? p.category_point ?? null);
   }
@@ -120,7 +120,10 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
   const activeMenu = await resolveActiveMenu(tx, tenantId, input.now);
   if (!activeMenu) throw new DomainError('NO_ACTIVE_MENU');
   if (prodRows.some((p) => p.menu_id !== activeMenu.menuId)) throw new DomainError('PRODUCT_NOT_IN_ACTIVE_MENU');
-  const cart = priceCart(catalog, input.items);
+  // Límites por pedido (gasto y cantidad), propios de cada local; por defecto $100.000 y 20 productos u 8 combos.
+  const cart = priceCart(catalog, input.items, {
+    maxTotalCents: num(settings.max_order_total_cents), maxIndividualItems: num(settings.max_individual_items), maxCombos: num(settings.max_combos),
+  });
 
   // 5. Origen informativo (nunca destino de entrega)
   let originName: string | null = null;

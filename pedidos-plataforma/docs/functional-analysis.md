@@ -24,6 +24,7 @@ No hay reservas, asignación de mesas, gestión de ocupación ni turnos. La ubic
 - Aceptación manual por defecto. Sin respuesta en 5 minutos, el pedido prepago se cancela y se reembolsa. Aceptación automática opcional (eventos).
 - Registro obligatorio en el MVP.
 - Alcohol: declaración de mayoría de edad al registrarse; verificación de DNI en el retiro como opción del local.
+- **Límites por pedido:** gasto máximo de $100.000 y 20 productos individuales u 8 combos. Se pueden mezclar: un combo equivale a 2,5 productos (8 combos = 20 productos). Son valores por defecto, configurables por local. En el carrito se muestran como una lista de requisitos (✓ / ✕) con un mensaje que indica cuánto hay que quitar, y el botón de pago se bloquea; el servidor los valida siempre.
 - Sin propinas. Disponibilidad solo disponible/no disponible (sin conteo de stock).
 - Facturación fiscal fuera del alcance (la hace el local).
 - Pedido no retirado: pasa a `no_retirado` al vencer el plazo; sin reembolso automático.

@@ -34,7 +34,7 @@ PostgreSQL 16. Este documento es el diseño; las migraciones ejecutables (Drizzl
 
 ### 2.2 Configuración del local
 
-**tenant_settings** (1 fila por tenant): `tenant_id` (PK), `ordering_paused bool`, `pause_message`, `pickup_mode` (`single_point|per_item`), `acceptance_mode` (`manual|auto`), `acceptance_timeout_seconds` (default 300), `max_concurrent_orders`, `max_orders_per_interval`, `interval_minutes`, `pickup_deadline_minutes`, `default_prep_minutes`, `id_check_on_pickup bool`.
+**tenant_settings** (1 fila por tenant): `tenant_id` (PK), `ordering_paused bool`, `pause_message`, `pickup_mode` (`single_point|per_item`), `acceptance_mode` (`manual|auto`), `acceptance_timeout_seconds` (default 300), `max_concurrent_orders`, `max_orders_per_interval`, `interval_minutes`, `pickup_deadline_minutes`, `default_prep_minutes`, `id_check_on_pickup bool`, `max_order_total_cents` (por defecto 10.000.000 = $100.000), `max_individual_items` (20), `max_combos` (8).
 
 **tenant_payment_methods**: `tenant_id`, `method` (`card_online|payment_app|cash_on_pickup|card_on_pickup`), `enabled`, `config jsonb`. Único `(tenant_id, method)`. En MVP 1 solo se permiten los dos electrónicos (se valida en la aplicación).
 

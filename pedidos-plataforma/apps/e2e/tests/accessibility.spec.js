@@ -81,3 +81,17 @@ test.describe('panel del local', () => {
     await expectAccessible(page, 'disponibilidad');
   });
 });
+
+test.describe('límites del pedido', () => {
+  test('carrito que supera los límites (aviso de error y botón deshabilitado)', async ({ page }) => {
+    await page.goto(customerUrl);
+    await page.getByRole('button', { name: 'Agregar Rubia Lager', exact: true }).click();
+    await page.getByRole('radio', { name: /Pinta/ }).click();
+    await page.getByRole('button', { name: /^Agregar ·/ }).click();
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    const plus = page.getByRole('group', { name: /Cantidad de Rubia Lager/ }).getByRole('button', { name: 'Agregar uno' });
+    for (let i = 0; i < 24; i++) await plus.click();   // 25 productos, $105.000: incumple gasto y cantidad
+    await expect(page.locator('.limits [role="alert"]')).toBeVisible();
+    await expectAccessible(page, 'carrito sobre el límite');
+  });
+});

@@ -13,7 +13,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 | 5. Backend | **Núcleo de negocio y capa HTTP implementados y probados**; falta ejecutar el arranque contra PostgreSQL real y el cobro (preferencia de pago) |
 | 6. Frontend | No iniciado (solo prototipos) |
 | 7. Pagos y QR | Lógica implementada y probada con proveedor simulado; **falta verificar contra el sandbox real de Mercado Pago** |
-| 8. Pruebas | Suite automatizada de 317 pruebas (más 7 de concurrencia opcionales, no ejecutadas), ejecutable en CI |
+| 8. Pruebas | Suite automatizada de 353 pruebas (más 7 de concurrencia opcionales, no ejecutadas), ejecutable en CI |
 | 9. Despliegue | No iniciado |
 
 ## 2. Qué existe
@@ -22,7 +22,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 - **Base de datos** (`apps/api/db`): 36 tablas, claves foráneas compuestas por local, Row-Level Security en las 30 tablas con datos por local (más la política de lectura abierta del directorio de cuentas), tablas de solo inserción (auditoría e historial), restricciones de coherencia entre pago y estado.
 - **Servicios** (`apps/api/src`): crear pedido (idempotente, capacidad, horarios, menú vigente, snapshots de precios); confirmar pago; aceptar, rechazar y cancelar con reembolso; preparar; asignar punto de retiro; retirar con QR de un solo uso; webhook de Mercado Pago (firma, deduplicación, consulta al proveedor, importe verificado); vencimiento de pedidos sin pagar; trabajador de reembolsos con reintentos; autenticación y sesiones; menús por evento; consultas de menú público, cola del local y seguimiento del cliente; consumidor del outbox que genera las notificaciones del cliente por cada hito (pago aprobado, recibido, aceptado, en preparación, listo con punto de retiro, entregado, rechazo o cancelación con motivo, reembolso) y las difunde por canales de usuario y de local.
 - **Prototipos** (`docs/ux/prototype`): app del cliente y panel del local, conectados entre sí por almacenamiento local del navegador.
-- **Pruebas**: 67 (dominio) + 126 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 92 (E2E y accesibilidad con Playwright en móvil y tablet).
+- **Pruebas**: 84 (dominio) + 133 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 104 (E2E y accesibilidad con Playwright en móvil y tablet).
 
 ## 3. Cómo ejecutarlo
 
@@ -49,8 +49,12 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 8. **Contraseñas con scrypt** de Node en lugar de argon2 (evita compilación nativa en Windows). Costo 2^15.
 9. **Declaración de mayoría de edad obligatoria** al registrarse.
 10. **Nombre de marca y logo:** los definió el responsable; el logo se revisó visualmente solo en captura.
+11. **Límites por pedido (pedido posterior):** $100.000 de gasto y 20 productos individuales u 8 combos. "20 u 8" se implementó como equivalencia (un combo = 2,5 productos, se pueden mezclar), y los tres valores son configurables por local (`tenant_settings`). Se aplican por pedido, no por persona.
 
 ## 5. Hallazgos durante el trabajo
+
+- **Los dos límites interactúan:** un combo de más de $12.500 hace que el tope de gasto salte antes que el de 8 combos (con el combo de ejemplo de $12.900, 8 combos suman $103.200). Con productos baratos manda el tope de cantidad.
+- **El límite es por pedido, no por persona:** quien quiera gastar más puede hacer varios pedidos seguidos. Una opción sería sumar los pedidos abiertos (sin entregar) de la misma persona en el local.
 
 - **Carrito del prototipo:** los botones de cantidad y eliminar no funcionaban (clave con comillas rota en un atributo HTML). Lo detectó la primera prueba E2E.
 - **Falta de RLS** en `provider_account_directory`: la prueba que exige RLS en toda tabla con `tenant_id` lo detectó.
@@ -86,4 +90,6 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 - Plazo de retención de datos de pagos (D3 en `docs/database-design.md`).
 - Hosting definitivo y presupuesto.
 - Confirmar que fuera de la ventana de un evento se vende el menú habitual.
+- ¿El límite debe ser por persona (sumando pedidos abiertos) y no solo por pedido? ¿Y debe actualizarse automáticamente con la inflación o lo revisa cada local?
+- Pago al retiro (MVP 2): conviene un tope de gasto menor, porque el local prepara sin cobrar.
 - Política de pedidos no retirados (plazo y reembolso) y de "strikes" (MVP 2).

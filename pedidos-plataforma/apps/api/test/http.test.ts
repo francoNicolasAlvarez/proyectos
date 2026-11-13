@@ -172,6 +172,33 @@ describe('menú y pedidos del cliente', () => {
     expect((await u.c.req('POST', `/venues/${s.slug}/orders`, orderBody(s, { paymentMethod: 'cash_on_pickup' }), idem())).status).toBe(400);
   });
 
+  it('el menú informa los límites por pedido y el tipo de cada producto', async () => {
+    const s = await seedTenant();
+    const r = await new Client().req('GET', `/venues/${s.slug}/menu`);
+    expect(r.body.limits).toEqual({ maxTotalCents: 10_000_000, maxIndividualItems: 20, maxCombos: 8 });
+    expect(r.body.categories[0].products[0].kind).toBe('simple');
+  });
+
+  it('un pedido que supera el límite de gasto o de cantidad responde 422 con el detalle y no se crea', async () => {
+    const s = await seedTenant(); const u = await newUser();
+    const lines = (q: number) => ({ paymentMethod: 'payment_app', items: [{ productId: s.beer, quantity: q, selections: { [s.size.group]: [s.size.pint] } }] });
+    // 25 cervezas × $4.200 = $105.000: supera el gasto y también las 20 unidades
+    const both = await u.c.req('POST', `/venues/${s.slug}/orders`, lines(25), idem());
+    expect(both.status).toBe(422);
+    expect(both.body.code).toBe('ORDER_TOTAL_LIMIT_EXCEEDED');
+    expect(both.body.violations).toEqual([
+      { code: 'ORDER_TOTAL_LIMIT_EXCEEDED', limit: 10_000_000, actual: 10_500_000 },
+      { code: 'ORDER_ITEM_LIMIT_EXCEEDED', limit: 20, actual: 25 },
+    ]);
+    expect(both.body.usage).toMatchObject({ individualItems: 25, combos: 0, totalCents: 10_500_000 });
+    // 21 cervezas = $88.200: solo supera la cantidad
+    const items = await u.c.req('POST', `/venues/${s.slug}/orders`, lines(21), idem());
+    expect(items.body.violations.map((v: Row) => v.code)).toEqual(['ORDER_ITEM_LIMIT_EXCEEDED']);
+    expect((await one('SELECT count(*)::int n FROM orders WHERE tenant_id=$1', [s.id])).n).toBe(0);
+    // 20 cervezas = $84.000: permitido
+    expect((await u.c.req('POST', `/venues/${s.slug}/orders`, lines(20), idem())).status).toBe(201);
+  });
+
   it('un cliente ve solo sus pedidos: otro recibe 404, un id inválido 400', async () => {
     const s = await seedTenant(); const a = await newUser(); const b = await newUser();
     const o = await a.c.req('POST', `/venues/${s.slug}/orders`, orderBody(s), idem());
