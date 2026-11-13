@@ -340,6 +340,19 @@ describe('aceptación, rechazo y cancelación', () => {
     expect(err).toBe('ORDER_NOT_FOUND');
   });
 
+  it('un cliente no puede cancelar el pedido de otro cliente del mismo local, ni aun con el contexto del local', async () => {
+    const s = await seedTenant();
+    const other = (await one("INSERT INTO users (email, name) VALUES ('vecino@x.com','V') RETURNING id")).id;
+    const o = await place(s, [friesLine(s)]);
+    const err = await code(withContext(db, { tenantId: s.id, userId: other, role: 'app_runtime' }, (tx) =>
+      transitionOrder(tx, { tenantId: s.id, orderId: o.orderId, to: 'cancelled', actor: 'customer', actorUserId: other })));
+    expect(err).toBe('ORDER_NOT_FOUND');
+    expect((await one('SELECT operational_status FROM orders WHERE id=$1', [o.orderId])).operational_status).toBe('awaiting_payment');
+    // sin identificar al cliente tampoco se puede
+    expect(await code(withContext(db, asCustomer(s), (tx) =>
+      transitionOrder(tx, { tenantId: s.id, orderId: o.orderId, to: 'cancelled', actor: 'customer' })))).toBe('ORDER_NOT_FOUND');
+  });
+
   it('no se puede saltear pasos', async () => {
     const s = await seedTenant();
     const o = await place(s, [friesLine(s)]);

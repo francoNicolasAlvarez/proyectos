@@ -10,6 +10,7 @@ import {
 } from '@pasamanos/shared';
 import { DomainError, num, type Queryable } from './db';
 import { hashToken, makePickupToken, makeShortCode } from './pickup-token';
+import { resolveActiveMenu } from './menu';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -87,7 +88,7 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
   const ids = [...new Set(input.items.map((i) => i.productId))];
   const prodRows = ids.length ? (await tx.query<Row>(
     `SELECT p.id, p.name, p.base_price_cents, p.available, p.archived_at, p.prep_minutes, p.pickup_point_id,
-            c.paused AS category_paused, c.pickup_point_id AS category_point
+            c.paused AS category_paused, c.pickup_point_id AS category_point, c.menu_id
      FROM products p JOIN categories c ON c.tenant_id = p.tenant_id AND c.id = p.category_id
      WHERE p.tenant_id=$1 AND p.id IN (${placeholders(2, ids.length)})`, [tenantId, ...ids])).rows : [];
   const optRows = ids.length ? (await tx.query<Row>(
@@ -111,6 +112,10 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
     });
     pickupByProduct.set(p.id, p.pickup_point_id ?? p.category_point ?? null);
   }
+  // Solo se puede pedir del menú vigente (el de evento durante su ventana; el habitual el resto del tiempo).
+  const activeMenu = await resolveActiveMenu(tx, tenantId, input.now);
+  if (!activeMenu) throw new DomainError('NO_ACTIVE_MENU');
+  if (prodRows.some((p) => p.menu_id !== activeMenu.menuId)) throw new DomainError('PRODUCT_NOT_IN_ACTIVE_MENU');
   const cart = priceCart(catalog, input.items);
 
   // 5. Origen informativo (nunca destino de entrega)
@@ -134,10 +139,10 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
   const eta = estimatePrepMinutes(cart.lines.map((l) => ({ prepMinutes: catalog.get(l.productId)?.prepMinutes ?? 0 })));
   const orderNumber = num((await tx.query<Row>('SELECT next_order_number($1, $2::date) AS n', [tenantId, clock.local_date])).rows[0]?.n);
   const order = (await tx.query<Row>(
-    `INSERT INTO orders (tenant_id, user_id, order_number, counter_date, origin_location_id, origin_location_name_snapshot, operational_status,
+    `INSERT INTO orders (tenant_id, user_id, order_number, counter_date, origin_location_id, origin_location_name_snapshot, event_id, operational_status,
        payment_timing, payment_method, payment_status, subtotal_cents, total_cents, currency, estimated_ready_at, idempotency_key)
-     VALUES ($1,$2,$3,$4::date,$5,$6,'awaiting_payment','prepaid',$7,'pending',$8,$8,$9, now() + make_interval(mins => $10::int), $11) RETURNING id`,
-    [tenantId, userId, orderNumber, clock.local_date, input.originLocationId ?? null, originName, input.paymentMethod, cart.subtotalCents, tenant.currency, eta, input.idempotencyKey])).rows[0] as Row;
+     VALUES ($1,$2,$3,$4::date,$5,$6,$12,'awaiting_payment','prepaid',$7,'pending',$8,$8,$9, now() + make_interval(mins => $10::int), $11) RETURNING id`,
+    [tenantId, userId, orderNumber, clock.local_date, input.originLocationId ?? null, originName, input.paymentMethod, cart.subtotalCents, tenant.currency, eta, input.idempotencyKey, activeMenu.eventId])).rows[0] as Row;
 
   for (const part of plan) {
     const partId = (await tx.query<Row>(
@@ -168,6 +173,8 @@ export interface TransitionInput {
 
 export async function transitionOrder(tx: Queryable, p: TransitionInput): Promise<{ refundRequested: boolean }> {
   const o = await lockOrder(tx, p.tenantId, p.orderId);
+  // Un cliente solo opera sobre SUS pedidos (RLS por sí sola no alcanza cuando el contexto incluye el local).
+  if (p.actor === 'customer' && (!p.actorUserId || p.actorUserId !== o.user_id)) throw new DomainError('ORDER_NOT_FOUND');
   assertOperationalTransition(o.operational_status, p.to, p.actor);
   const closing = p.to === 'rejected' || p.to === 'cancelled';
   if (closing && p.actor !== 'customer' && !p.reasonCode) throw new DomainError('REASON_REQUIRED');
@@ -286,7 +293,8 @@ export async function markPartReady(tx: Queryable, p: {
   return { token, shortCode, orderReady };
 }
 
-/** Datos para que el cliente muestre su QR (se recalcula; el servidor no guarda el token en claro). */
+/** Datos para que el cliente muestre su QR (se recalcula; el servidor no guarda el token en claro).
+ *  IMPORTANTE: el llamador debe haber verificado antes que la parte pertenece al cliente (ver getCustomerOrder). */
 export async function getPickupCredentials(tx: Queryable, p: { tenantId: string; partId: string; secret: string }) {
   const t = (await tx.query<Row>('SELECT short_code, used_at FROM pickup_tokens WHERE order_part_id=$1 ORDER BY created_at DESC LIMIT 1', [p.partId])).rows[0];
   if (!t) return null;
