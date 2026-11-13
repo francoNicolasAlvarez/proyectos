@@ -15,6 +15,7 @@ No hay reservas, asignación de mesas, gestión de ocupación ni turnos. La ubic
 | Medios de pago | Los habilita cada local: tarjeta asociada o app de pagos (se cobra al pedir); efectivo o tarjeta física (se cobra al retirar). |
 | Efectivo | No se registra vuelto, solo método y monto cobrado. |
 | Cobro de la plataforma | Suscripción fija por local. Los pagos electrónicos van directo a la cuenta de Mercado Pago del local (OAuth). Comisión por transacción en una fase posterior. |
+| Punto de retiro con varios puntos que sirven todo el menú (`single_point`) | Lo asigna el empleado al marcar el pedido como listo. |
 | Pago al retiro | MVP 2 (el esquema ya lo soporta). MVP 1 es solo prepago. |
 | Stack | TypeScript de punta a punta. |
 

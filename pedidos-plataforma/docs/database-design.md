@@ -30,7 +30,7 @@ PostgreSQL 16. Este documento es el diseño; las migraciones ejecutables (Drizzl
 
 ### 2.2 Configuración del local
 
-**tenant_settings** (1 fila por tenant): `tenant_id` (PK), `ordering_paused bool`, `pause_message`, `pickup_mode` (`single_point|per_item`), `customer_chooses_pickup_point bool`, `acceptance_mode` (`manual|auto`), `acceptance_timeout_seconds` (default 300), `max_concurrent_orders`, `max_orders_per_interval`, `interval_minutes`, `pickup_deadline_minutes`, `default_prep_minutes`, `id_check_on_pickup bool`.
+**tenant_settings** (1 fila por tenant): `tenant_id` (PK), `ordering_paused bool`, `pause_message`, `pickup_mode` (`single_point|per_item`), `acceptance_mode` (`manual|auto`), `acceptance_timeout_seconds` (default 300), `max_concurrent_orders`, `max_orders_per_interval`, `interval_minutes`, `pickup_deadline_minutes`, `default_prep_minutes`, `id_check_on_pickup bool`.
 
 **tenant_payment_methods**: `tenant_id`, `method` (`card_online|payment_app|cash_on_pickup|card_on_pickup`), `enabled`, `config jsonb`. Único `(tenant_id, method)`. En MVP 1 solo se permiten los dos electrónicos (se valida en la aplicación).
 
@@ -142,6 +142,6 @@ Un local demo con: un owner, un manager, un operador de pedidos y uno de entrega
 
 ## 8. Decisiones pendientes que afectan este diseño
 
-- **D1. Modo `single_point` con varios puntos numerados:** ¿quién decide el punto? Opciones: (a) el cliente elige al pagar (`customer_chooses_pickup_point`), (b) el empleado lo asigna al marcar el pedido como listo, (c) asignación automática al menos cargado. El esquema soporta las tres; hay que elegir la del MVP. Recomiendo (b), que no agrega pasos al cliente y deja el control al local.
+- **D1 (resuelta): modo `single_point` con varios puntos numerados.** El **empleado asigna el punto de retiro al marcar el pedido como listo**. Hasta entonces `order_parts.pickup_point_id` queda en `NULL` (salvo que el local tenga un único punto, en cuyo caso se asigna al crear el pedido). La notificación de "listo" indica el punto asignado. Se descartaron la elección por el cliente y la asignación automática; se podrán agregar después sin cambiar el esquema.
 - **D2. Combos con productos de puntos distintos:** el modelo actual retira un combo completo en un solo punto. Si algún local necesita partirlo, habría que dividir sus componentes en partes.
 - **D3. Plazo de retención del `raw` de pagos y notificaciones.**
