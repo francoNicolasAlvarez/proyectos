@@ -2,7 +2,7 @@
  * Arranque del servidor. Lee la configuración del entorno y falla de inmediato si falta algo o es débil.
  * NO probado contra un PostgreSQL real todavía (ver docs/progress-report.md).
  */
-import { Pool } from 'pg';
+import pg from 'pg';   // pg es CommonJS: Node no permite importar { Pool } con nombre al ejecutarse directamente
 import { z } from 'zod';
 import { buildApp } from './http/app';
 import { MercadoPagoProvider } from './payments/mercadopago';
@@ -23,7 +23,7 @@ const env = z.object({
   NODE_ENV: z.string().default('development'),
 }).parse(process.env);
 
-const pool = new Pool({ connectionString: env.DATABASE_URL, max: 20 });
+const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 20 });
 const db = pgDatabase(pool);
 const hub = new InMemoryHub();
 const provider = new MercadoPagoProvider();

@@ -5,7 +5,9 @@
   "scripts": {
     "test": "node --test \"test/**/*.test.mjs\" && vitest run",
     "typecheck": "tsc --noEmit",
-    "start": "node --import tsx src/server.ts"
+    "start": "node --env-file=../../.env --import tsx src/server.ts",
+    "db:setup": "node scripts/db-setup.mjs",
+    "db:seed": "node --import tsx scripts/seed-demo.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17",

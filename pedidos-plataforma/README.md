@@ -39,9 +39,26 @@ pnpm test
 
 Abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototype/venue-panel/index.html` en dos pestañas del mismo navegador: comparten los pedidos.
 
-## Desarrollo local
+## Base de datos local y servidor
+
+PostgreSQL 17 local, sin administrador ni Docker (usa los binarios de `embedded-postgres`, copiados a una ruta corta
+porque dentro de `node_modules` la ruta supera los 260 caracteres de Windows).
 
 ```
-cp .env.example .env
-docker compose -f infra/docker-compose.yml up -d
+pnpm install
+cp .env.example .env                      # completar DATABASE_URL, MIGRATION_DATABASE_URL, TEST_DATABASE_URL y los secretos
+powershell -File infra/local-postgres.ps1 setup   # una sola vez: copia binarios e inicializa
+powershell -File infra/local-postgres.ps1 start   # cada vez que se reinicie la PC
+cd apps/api
+pnpm run db:setup                         # crea bases, aplica la migración, fija contraseñas y las exige
+pnpm run db:seed                          # local de demostración "el-faro" y una cuenta por rol
+pnpm run start                            # API en http://localhost:3000
 ```
+
+Pruebas contra PostgreSQL real con varias conexiones (solo corren sobre bases cuyo nombre termina en `_test`, porque reinician el esquema):
+
+```
+TEST_DATABASE_URL=postgres://postgres:CONTRASEÑA@localhost:5432/pedidos_test pnpm exec vitest run test/postgres.integration.test.ts
+```
+
+Las cuentas de demostración usan la contraseña de prueba definida en `apps/api/scripts/seed-demo.ts` (solo desarrollo).
