@@ -173,14 +173,14 @@ describe('precios', () => {
   const beer: ProductDef = {
     id: 'beer', name: 'Rubia', basePriceCents: 420_000, available: true, prepMinutes: 2,
     groups: [{ id: 'size', name: 'Tamaño', minSelect: 1, maxSelect: 1, options: [
-      { id: 'pint', priceDeltaCents: 0, available: true }, { id: 'liter', priceDeltaCents: 380_000, available: true },
-      { id: 'xl', priceDeltaCents: 900_000, available: false } ] }],
+      { id: 'pint', name: 'pint', priceDeltaCents: 0, available: true }, { id: 'liter', name: 'liter', priceDeltaCents: 380_000, available: true },
+      { id: 'xl', name: 'xl', priceDeltaCents: 900_000, available: false } ] }],
   };
   const lemonade: ProductDef = {
     id: 'lem', name: 'Limonada', basePriceCents: 320_000, available: true, prepMinutes: 3,
     groups: [{ id: 'extra', name: 'Agregados', minSelect: 0, maxSelect: 2, options: [
-      { id: 'ginger', priceDeltaCents: 30_000, available: true }, { id: 'mint', priceDeltaCents: 30_000, available: true },
-      { id: 'honey', priceDeltaCents: 50_000, available: true } ] }],
+      { id: 'ginger', name: 'ginger', priceDeltaCents: 30_000, available: true }, { id: 'mint', name: 'mint', priceDeltaCents: 30_000, available: true },
+      { id: 'honey', name: 'honey', priceDeltaCents: 50_000, available: true } ] }],
   };
   const catalog = new Map([[beer.id, beer], [lemonade.id, lemonade]]);
   const err = (fn: () => unknown) => { try { fn(); } catch (e) { return (e as PricingError).code; } return null; };
@@ -189,7 +189,7 @@ describe('precios', () => {
     const l = priceLine(beer, { productId: 'beer', quantity: 3, selections: { size: ['liter'] } });
     expect(l.unitPriceCents).toBe(800_000);
     expect(l.lineTotalCents).toBe(2_400_000);
-    expect(l.chosen).toEqual([{ groupId: 'size', groupName: 'Tamaño', optionId: 'liter', priceDeltaCents: 380_000 }]);
+    expect(l.chosen).toEqual([{ groupId: 'size', groupName: 'Tamaño', optionId: 'liter', optionName: 'liter', priceDeltaCents: 380_000 }]);
   });
 
   it('exige las opciones obligatorias y respeta el máximo', () => {

@@ -3,7 +3,7 @@
  * Importes en centavos enteros.
  */
 
-export interface OptionDef { id: string; priceDeltaCents: number; available: boolean }
+export interface OptionDef { id: string; name: string; priceDeltaCents: number; available: boolean }
 export interface OptionGroupDef { id: string; name: string; minSelect: number; maxSelect: number; options: readonly OptionDef[] }
 export interface ProductDef {
   id: string;
@@ -19,7 +19,7 @@ export interface ProductDef {
 export interface LineInput { productId: string; quantity: number; selections: Readonly<Record<string, readonly string[]>> }
 export interface PricedLine {
   productId: string; quantity: number; unitPriceCents: number; lineTotalCents: number;
-  chosen: { groupId: string; groupName: string; optionId: string; priceDeltaCents: number }[];
+  chosen: { groupId: string; groupName: string; optionId: string; optionName: string; priceDeltaCents: number }[];
 }
 
 export type PricingErrorCode =
@@ -55,7 +55,7 @@ export function priceLine(product: ProductDef | undefined, line: LineInput): Pri
       if (!o) throw new PricingError('UNKNOWN_OPTION', product.id, g.id);
       if (!o.available) throw new PricingError('OPTION_UNAVAILABLE', product.id, g.id);
       unit += o.priceDeltaCents;
-      chosen.push({ groupId: g.id, groupName: g.name, optionId: o.id, priceDeltaCents: o.priceDeltaCents });
+      chosen.push({ groupId: g.id, groupName: g.name, optionId: o.id, optionName: o.name, priceDeltaCents: o.priceDeltaCents });
     }
   }
   return { productId: product.id, quantity: line.quantity, unitPriceCents: unit, lineTotalCents: unit * line.quantity, chosen };

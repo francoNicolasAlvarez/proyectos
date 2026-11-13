@@ -601,6 +601,9 @@ DO $$ DECLARE t text; BEGIN
   END LOOP;
 END $$;
 
+-- Tokens de retiro: el cliente puede LEER los de sus pedidos (para mostrar su QR); nunca modificarlos.
+CREATE POLICY customer_read ON pickup_tokens FOR SELECT USING (order_part_id IN (SELECT id FROM order_parts));
+
 -- Pedidos: el local los ve por tenant; el cliente, los suyos en todos los locales.
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders FORCE ROW LEVEL SECURITY;
