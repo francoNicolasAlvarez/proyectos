@@ -10,10 +10,10 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 | 2. Arquitectura técnica | Completa (`docs/architecture.md`, 6 ADR) |
 | 3. Base de datos | **Implementada y probada** (`apps/api/db/migrations/0001_init.sql`) |
 | 4. UX/UI | Prototipos navegables del cliente y del panel, conectados entre sí |
-| 5. Backend | **Núcleo de negocio implementado y probado**; falta la capa HTTP |
+| 5. Backend | **Núcleo de negocio y capa HTTP implementados y probados**; falta el arranque contra PostgreSQL real, el cobro (preferencia de pago) y el canal SSE |
 | 6. Frontend | No iniciado (solo prototipos) |
 | 7. Pagos y QR | Lógica implementada y probada con proveedor simulado; **falta verificar contra el sandbox real de Mercado Pago** |
-| 8. Pruebas | Suite automatizada de 294 pruebas, ejecutable en CI |
+| 8. Pruebas | Suite automatizada de 313 pruebas, ejecutable en CI |
 | 9. Despliegue | No iniciado |
 
 ## 2. Qué existe
@@ -22,7 +22,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 - **Base de datos** (`apps/api/db`): 36 tablas, claves foráneas compuestas por local, Row-Level Security en las 30 tablas con datos por local (más la política de lectura abierta del directorio de cuentas), tablas de solo inserción (auditoría e historial), restricciones de coherencia entre pago y estado.
 - **Servicios** (`apps/api/src`): crear pedido (idempotente, capacidad, horarios, menú vigente, snapshots de precios); confirmar pago; aceptar, rechazar y cancelar con reembolso; preparar; asignar punto de retiro; retirar con QR de un solo uso; webhook de Mercado Pago (firma, deduplicación, consulta al proveedor, importe verificado); vencimiento de pedidos sin pagar; trabajador de reembolsos con reintentos; autenticación y sesiones; menús por evento; consultas de menú público, cola del local y seguimiento del cliente; consumidor del outbox que genera las notificaciones del cliente por cada hito (pago aprobado, recibido, aceptado, en preparación, listo con punto de retiro, entregado, rechazo o cancelación con motivo, reembolso) y las difunde por canales de usuario y de local.
 - **Prototipos** (`docs/ux/prototype`): app del cliente y panel del local, conectados entre sí por almacenamiento local del navegador.
-- **Pruebas**: 67 (dominio) + 103 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 92 (E2E y accesibilidad con Playwright en móvil y tablet).
+- **Pruebas**: 67 (dominio) + 122 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 92 (E2E y accesibilidad con Playwright en móvil y tablet).
 
 ## 3. Cómo ejecutarlo
 
@@ -59,7 +59,7 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 
 ## 6. Lo que NO está hecho ni verificado
 
-- **Capa HTTP** (Fastify o NestJS): rutas, validación de entrada con Zod, cookies de sesión, CSRF, CORS, limitación de intentos de login y de peticiones. Hoy todo es llamable solo como funciones.
+- **Capa HTTP: lo que falta.** Están las rutas de cuenta, menú, pedidos, personal, notificaciones y webhook (Fastify, Zod, cookie de sesión, CSRF por origen, límite de intentos de login). Falta: endpoint SSE, creación de la preferencia de pago, CORS configurable, límite general de peticiones, y la limitación de login usa memoria (debe pasar a Redis para varias instancias).
 - **Transporte de tiempo real (SSE/Redis pub/sub):** el consumidor del outbox publica en una interfaz `Realtime` que todavía no tiene implementación; push, email y WhatsApp quedan para después.
 - **Conexión OAuth con Mercado Pago**, creación de la preferencia de pago y obtención de credenciales por local.
 - **El adaptador de Mercado Pago** está escrito de la documentación pública y probado solo con respuestas simuladas. Hay que verificar firma, campos y reembolsos contra el sandbox real, y revisar condiciones y tarifas vigentes.
@@ -72,7 +72,7 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 
 ## 7. Próximos pasos recomendados
 
-1. Capa HTTP con autenticación y los endpoints del MVP, usando los servicios existentes y pruebas de integración HTTP.
+1. Completar la capa HTTP: SSE, creación del cobro, administración de catálogo, sectores y puntos de retiro, y alta de empleados.
 2. Implementar el transporte SSE (interfaz `Realtime`) y programar el despacho periódico del outbox, de los reembolsos y del vencimiento de pedidos.
 3. Flujo OAuth y creación de cobros con Mercado Pago, probando contra el sandbox.
 4. Servicio de PostgreSQL en CI para pruebas de concurrencia.
