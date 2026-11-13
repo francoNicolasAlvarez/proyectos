@@ -183,6 +183,15 @@ describe('seguridad de la página simulada y del webhook', () => {
     expect((await c.req('POST', `/dev/pay/${o.orderId}/regalar`)).status).toBe(422);
   });
 
+  it('el formato antiguo de aviso (?id=…&topic=payment) se ignora con 200 para que Mercado Pago no lo reintente', async () => {
+    const r = await app.inject({ method: 'POST', url: '/webhooks/mercadopago?id=123&topic=payment', headers: { 'content-type': 'application/json' }, payload: '{}' });
+    expect(r.statusCode).toBe(200);
+    expect(safe(r.body)).toEqual({ outcome: 'ignored' });
+    // el formato actual sin firma válida sigue rechazándose
+    const bad = await app.inject({ method: 'POST', url: '/webhooks/mercadopago?data.id=123&type=payment', headers: { 'content-type': 'application/json', 'x-signature': 'ts=1,v1=falsa', 'x-request-id': 'r' }, payload: '{"data":{"id":"123"}}' });
+    expect(bad.statusCode).toBe(401);
+  });
+
   it('el webhook rechaza firmas falsas y no procesa dos veces el mismo evento', async () => {
     const s = await seedTenant(); const c = await user();
     const o = await makeOrder(c, s);

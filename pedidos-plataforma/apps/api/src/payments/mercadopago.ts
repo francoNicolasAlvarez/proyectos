@@ -9,6 +9,12 @@ import type { CheckoutInput, PaymentProvider, ProviderPayment, ProviderPaymentSt
 
 const API = 'https://api.mercadopago.com';
 
+/** Error con el cuerpo de la respuesta (sin datos sensibles: Mercado Pago no devuelve credenciales en los errores). */
+async function failure(label: string, r: Response): Promise<Error> {
+  const body = (await r.text().catch(() => '')).replace(/s+/g, ' ').slice(0, 400);
+  return new Error(`mercadopago ${label} ${r.status}${body ? ': ' + body : ''}`);
+}
+
 function parseSignature(header: string | undefined): { ts?: string; v1?: string } {
   const out: { ts?: string; v1?: string } = {};
   for (const part of (header ?? '').split(',')) {
@@ -84,7 +90,7 @@ export class MercadoPagoProvider implements PaymentProvider {
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(`mercadopago createCheckout ${r.status}`);
+    if (!r.ok) throw await failure('createCheckout', r);
     const p = await r.json() as Record<string, unknown>;
     const url = p.init_point;
     if (typeof url !== 'string') throw new Error('mercadopago createCheckout: la respuesta no trae init_point');
@@ -93,7 +99,7 @@ export class MercadoPagoProvider implements PaymentProvider {
 
   async getPayment(accessToken: string, paymentId: string): Promise<ProviderPayment> {
     const r = await this.f(`${API}/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!r.ok) throw new Error(`mercadopago getPayment ${r.status}`);
+    if (!r.ok) throw await failure('getPayment', r);
     const p = await r.json() as Record<string, unknown>;
     return {
       id: String(p.id), status: mpStatus(p.status as string | undefined),
@@ -108,7 +114,7 @@ export class MercadoPagoProvider implements PaymentProvider {
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': idempotencyKey },
       body: JSON.stringify({ amount: amountCents / 100 }),
     });
-    if (!r.ok) throw new Error(`mercadopago refund ${r.status}`);
+    if (!r.ok) throw await failure('refund', r);
     const b = await r.json() as Record<string, unknown>;
     return { refundId: String(b.id) };
   }

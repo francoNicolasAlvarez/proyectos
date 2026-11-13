@@ -30,6 +30,8 @@ export interface AppConfig {
   appBaseUrl: string;
   /** Solo desarrollo: habilita la página de pago simulada. Nunca en producción. */
   simulated?: SimulatedProvider;
+  /** Registro de eventos (JSON a stdout). Nunca incluye cookies ni credenciales. */
+  logger?: boolean;
   /** Difusión en tiempo real (SSE). Si no se indica, los endpoints de eventos no se registran. */
   hub?: InMemoryHub;
   /** Orígenes permitidos para peticiones con cookie (protección CSRF). */
@@ -71,7 +73,10 @@ const schemas = {
 };
 
 export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, bodyLimit: 100_000 });
+  const app = Fastify({
+    logger: cfg.logger ? { level: 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'req.headers["x-signature"]'] } : false,
+    bodyLimit: 100_000,
+  });
   await app.register(cookie);
   const role = cfg.dbRole;
 
@@ -83,6 +88,8 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
 
   /* ---------- errores ---------- */
   app.setErrorHandler((err, _req, reply) => {
+    // Los avisos de pago rechazados son lo más difícil de diagnosticar desde afuera: se anota por qué (solo nombres de cabeceras).
+    if (_req.url.startsWith('/webhooks/')) app.log.warn({ code: (err as { code?: string }).code ?? err.name, headerNames: Object.keys(_req.headers) }, 'webhook rechazado');
     if (err instanceof ZodError) return reply.code(400).send({ code: 'VALIDATION', issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
     if (err instanceof OrderLimitError) return reply.code(422).send({ code: err.code, violations: err.violations, usage: err.usage });
     if (err instanceof PricingError) return reply.code(422).send({ code: err.code, productId: err.productId ?? null });
@@ -270,6 +277,10 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
 
   /* ---------- webhook del proveedor de pagos (sin cookie: se autentica por firma) ---------- */
   app.post('/webhooks/mercadopago', async (req, reply) => {
+    // Mercado Pago manda cada pago en dos formatos: el actual (?data.id=…&type=payment) y uno antiguo (?id=…&topic=payment).
+    // El antiguo no se procesa (el actual ya trae todo): se responde 200 para que no lo reintente.
+    const q = req.query as Record<string, string | undefined>;
+    if (q.topic && !q['data.id']) return reply.code(200).send({ outcome: 'ignored' });
     const raw = (req as FastifyRequest & { rawBody?: string }).rawBody ?? '';
     const headers: Record<string, string | undefined> = {};
     for (const [k, v] of Object.entries(req.headers)) headers[k] = Array.isArray(v) ? v[0] : v;

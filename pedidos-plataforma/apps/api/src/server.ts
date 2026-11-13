@@ -45,6 +45,7 @@ const app = await buildApp({
   webhookSecret: env.MP_WEBHOOK_SECRET,
   encryptionKey,
   provider,
+  logger: true,
   publicApiUrl,
   appBaseUrl,
   simulated,

@@ -43,7 +43,7 @@ recorrer todo el flujo sin Mercado Pago. El servidor se niega a arrancar así co
 
 Para probar con Mercado Pago real: poner `MP_TEST_ACCESS_TOKEN` en `.env`, ejecutar `pnpm run db:connect-mp` y arrancar con
 `PAYMENTS_MODE=mercadopago` y `PUBLIC_API_URL` apuntando a una dirección pública (un túnel), configurada también como URL de
-notificaciones en la aplicación de Mercado Pago. Ese camino todavía no se verificó contra la API real.
+notificaciones en la aplicación de Mercado Pago. Creación del cobro, pago, aviso y reembolso reales se verificaron con cuentas de prueba (ver `docs/progress-report.md`); la validación de la firma con la clave secreta real todavía no.
 
 ## Ver los prototipos
 
