@@ -32,7 +32,11 @@ describe.skipIf(!enabled)('PostgreSQL real, varias conexiones', () => {
       stop = async () => { await server.stop(); rmSync(dir, { recursive: true, force: true }); };
       url = `postgres://postgres:pw@localhost:${port}/pasamanos`;
     }
+    // Seguridad: este test BORRA el esquema para poder repetirse. Solo se permite sobre bases cuyo nombre termina en _test.
+    const dbName = decodeURIComponent(new URL(url).pathname.slice(1));
+    if (!/_test$/.test(dbName)) throw new Error(`TEST_DATABASE_URL apunta a "${dbName}": por seguridad el nombre de la base debe terminar en _test`);
     pool = new Pool({ connectionString: url, max: 12 });
+    await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await pool.query(readFileSync(fileURLToPath(new URL('../db/migrations/0001_init.sql', import.meta.url)), 'utf8'));
     db = pgDatabase(pool);
   }, 120_000);
@@ -92,7 +96,7 @@ describe.skipIf(!enabled)('PostgreSQL real, varias conexiones', () => {
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const codes = results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code);
     expect(new Set(codes)).toEqual(new Set(['ALREADY_USED']));
-    expect((await q("SELECT count(*)::int n FROM order_status_history WHERE order_id=$1 AND to_status='delivered'", [o.orderId]))[0]!.n).toBe(1);
+    expect((await q("SELECT count(*)::int n FROM order_status_history WHERE order_id=$1 AND axis='part' AND to_status='delivered'", [o.orderId]))[0]!.n).toBe(1);
   });
 
   it('8 solicitudes simultáneas con la misma clave de idempotencia crean un solo pedido', async () => {
