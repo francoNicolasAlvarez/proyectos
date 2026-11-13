@@ -565,6 +565,7 @@ CREATE UNIQUE INDEX pickup_tokens_active_code ON pickup_tokens (tenant_id, short
 ------------------------------------------------------------------
 CREATE TABLE notifications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq bigint GENERATED ALWAYS AS IDENTITY,   -- orden estable (created_at es igual dentro de una transacción)
   tenant_id uuid REFERENCES tenants (id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
   type text NOT NULL,
@@ -575,6 +576,7 @@ CREATE TABLE notifications (
 
 CREATE TABLE outbox_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq bigint GENERATED ALWAYS AS IDENTITY,   -- orden estable de emisión (created_at es igual dentro de una transacción)
   tenant_id uuid NOT NULL REFERENCES tenants (id) ON DELETE CASCADE,
   type text NOT NULL,
   payload jsonb NOT NULL DEFAULT '{}',

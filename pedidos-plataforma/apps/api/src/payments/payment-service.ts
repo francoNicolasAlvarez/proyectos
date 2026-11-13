@@ -136,7 +136,7 @@ export async function processPendingRefunds(deps: PaymentDeps, opts: { maxAttemp
           await tx.query(
             `INSERT INTO order_status_history (tenant_id, order_id, axis, from_status, to_status, actor_kind) VALUES ($1,$2,'payment','refund_pending',$3,'provider')`, [r.tenant_id, order.id, to]);
         }
-        await tx.query('INSERT INTO outbox_events (tenant_id, type, payload) VALUES ($1,$2,$3)', [r.tenant_id, 'refund.succeeded', JSON.stringify({ refundId: r.id })]);
+        await tx.query('INSERT INTO outbox_events (tenant_id, type, payload) VALUES ($1,$2,$3)', [r.tenant_id, 'refund.succeeded', JSON.stringify({ refundId: r.id, orderId: order?.id ?? null })]);
       });
       summary.succeeded++;
     } catch (e) {
