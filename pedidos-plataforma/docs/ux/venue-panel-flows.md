@@ -54,6 +54,10 @@ Lista de productos con interruptor de disponible o agotado, y pausa por categor�
 - **Pagos:** conectar Mercado Pago (OAuth) y medios habilitados.
 - **Marca:** logo y color, con verificación de contraste.
 
-## 6. Pendiente
+## 6. Prototipo
 
-Prototipo visual del panel, alta guiada de un local nuevo (onboarding) y diseño del panel del super admin.
+Hay un prototipo navegable en `docs/ux/prototype/venue-panel/index.html`, conectado con el del cliente (cola de pedidos, aceptar con tiempo estimado, rechazar con motivo, asignación del punto de retiro, escáner por código, disponibilidad y pausa). Se verificó con pruebas E2E y de accesibilidad.
+
+## 7. Pendiente
+
+Alta guiada de un local nuevo (onboarding), pantallas de catálogo y configuración, y diseño del panel del super admin.
