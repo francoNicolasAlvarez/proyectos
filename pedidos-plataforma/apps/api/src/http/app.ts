@@ -11,6 +11,7 @@ import { DomainError, withContext, type Database } from '../db';
 import { resolveTenantBySlug } from '../menu';
 import { listNotifications, markNotificationsRead } from '../notifications';
 import { createOrder, markPartReady, redeemPickup, transitionOrder } from '../order-service';
+import type { InMemoryHub } from '../realtime';
 import { handlePaymentWebhook } from '../payments/payment-service';
 import type { PaymentProvider } from '../payments/provider';
 import { getCustomerOrder, getPublicMenu, getVenueQueue } from '../read-models';
@@ -21,6 +22,8 @@ export interface AppConfig {
   webhookSecret: string;
   encryptionKey: Buffer;
   provider: PaymentProvider;
+  /** Difusión en tiempo real (SSE). Si no se indica, los endpoints de eventos no se registran. */
+  hub?: InMemoryHub;
   /** Orígenes permitidos para peticiones con cookie (protección CSRF). */
   allowedOrigins: string[];
   secureCookies: boolean;
@@ -230,6 +233,27 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
       { rawBody: raw, headers, query: req.query as Record<string, string | undefined> });
     return reply.code(200).send(r);   // 200 evita reintentos del proveedor; los errores reales devuelven 4xx/5xx
   });
+
+  /* ---------- tiempo real (SSE) ---------- */
+  // El estado de verdad siempre se pide por GET; SSE solo avisa que algo cambió (al reconectar, el cliente re-consulta).
+  const stream = (req: FastifyRequest, reply: FastifyReply, channel: string) => {
+    const hub = cfg.hub as InMemoryHub;
+    reply.hijack();
+    const raw = reply.raw;
+    raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    raw.write(': conectado\n\n');
+    const off = hub.subscribe(channel, (m) => raw.write(`event: message\ndata: ${JSON.stringify(m)}\n\n`));
+    const beat = setInterval(() => raw.write(': latido\n\n'), 25_000);
+    const close = () => { clearInterval(beat); off(); };
+    req.raw.on('close', close);
+  };
+  if (cfg.hub) {
+    app.get('/events', async (req, reply) => { const u = await currentUser(req); stream(req, reply, `user:${u.id}`); });
+    app.get('/venues/:slug/staff/events', async (req, reply) => {
+      const { tenant } = await staff(req, (req.params as { slug: string }).slug, 'orders.view');
+      stream(req, reply, `tenant:${tenant.id}`);
+    });
+  }
 
   app.get('/health', async () => ({ ok: true }));
   return app;

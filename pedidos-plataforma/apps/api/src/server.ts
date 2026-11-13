@@ -6,7 +6,10 @@ import { Pool } from 'pg';
 import { z } from 'zod';
 import { buildApp } from './http/app';
 import { MercadoPagoProvider } from './payments/mercadopago';
+import { dispatchOutbox } from './notifications';
+import { expireUnpaidOrders, processPendingRefunds } from './payments/payment-service';
 import { pgDatabase } from './pg-database';
+import { InMemoryHub } from './realtime';
 
 const secret = z.string().min(32, 'debe tener al menos 32 caracteres');
 const env = z.object({
@@ -21,17 +24,39 @@ const env = z.object({
 }).parse(process.env);
 
 const pool = new Pool({ connectionString: env.DATABASE_URL, max: 20 });
+const db = pgDatabase(pool);
+const hub = new InMemoryHub();
+const provider = new MercadoPagoProvider();
+const encryptionKey = Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'base64');
 const app = await buildApp({
-  db: pgDatabase(pool),
+  db,
+  hub,
   pickupSecret: env.PICKUP_SECRET,
   webhookSecret: env.MP_WEBHOOK_SECRET,
-  encryptionKey: Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'base64'),
-  provider: new MercadoPagoProvider(),
+  encryptionKey,
+  provider,
   allowedOrigins: env.ALLOWED_ORIGINS,
   secureCookies: env.NODE_ENV === 'production',
 });
 
-const close = async () => { await app.close(); await pool.end(); process.exit(0); };
+// Tareas periódicas. Con varias instancias son seguras: usan FOR UPDATE SKIP LOCKED y claves de idempotencia.
+const every = (ms: number, name: string, fn: () => Promise<unknown>) => {
+  let running = false;
+  const t = setInterval(async () => {
+    if (running) return;            // sin solapar ejecuciones
+    running = true;
+    try { await fn(); } catch (e) { app.log.error({ err: e, task: name }, 'tarea periódica fallida'); } finally { running = false; }
+  }, ms);
+  t.unref();
+  return t;
+};
+const timers = [
+  every(1_000, 'outbox', () => dispatchOutbox(db, hub)),
+  every(30_000, 'refunds', () => processPendingRefunds({ db, provider, webhookSecret: env.MP_WEBHOOK_SECRET, encryptionKey })),
+  every(60_000, 'expire-unpaid', () => expireUnpaidOrders(db, { olderThanMinutes: 15 })),
+];
+
+const close = async () => { timers.forEach(clearInterval); await app.close(); await pool.end(); process.exit(0); };
 process.on('SIGTERM', close);
 process.on('SIGINT', close);
 
