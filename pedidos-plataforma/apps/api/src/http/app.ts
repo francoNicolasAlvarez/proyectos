@@ -8,6 +8,7 @@ import { z, ZodError } from 'zod';
 import { CANCELLATION_REASONS, InvalidTransitionError, OrderLimitError, PricingError, can, type Action } from '@pasamanos/shared';
 import { SESSION_DAYS, authenticate, login, logout, registerUser, roleIn, type AuthUser } from '../auth';
 import { DomainError, withContext, type Database } from '../db';
+import { setCategoryPaused, setOrderingPaused, setProductAvailable } from '../catalog-admin';
 import { buildCheckout } from '../checkout-service';
 import { confirmLimitsReviewed, getLimitsReport, updateLimits } from '../limits-service';
 import { resolveTenantBySlug } from '../menu';
@@ -49,7 +50,7 @@ const STATUS: Record<string, number> = {
   ORDER_NOT_FOUND: 404, PART_NOT_FOUND: 404, TENANT_NOT_FOUND: 404, TENANT_NOT_ACTIVE: 404, UNKNOWN_ACCOUNT: 404, NO_ACTIVE_MENU: 404,
   EMAIL_TAKEN: 409, ALREADY_USED: 409, IDEMPOTENCY_KEY_REUSED: 409, AMOUNT_MISMATCH: 409,
   PAUSED: 409, CLOSED: 409, CONCURRENT_LIMIT: 409, INTERVAL_LIMIT: 409, PRODUCT_NOT_IN_ACTIVE_MENU: 409,
-  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
+  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, PRODUCT_NOT_FOUND: 404, CATEGORY_NOT_FOUND: 404, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
   ORDER_NOT_PAYABLE: 409, PAYMENT_WINDOW_EXPIRED: 409, PAYMENT_ACCOUNT_NOT_CONNECTED: 409,
 };
 
@@ -258,6 +259,23 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
     const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'orders.deliver');
     const b = schemas.redeem.parse(req.body);
     return withContext(cfg.db, ctx, (tx) => redeemPickup(tx, { tenantId: tenant.id, staffUserId: user.id, token: b.token, shortCode: b.shortCode }));
+  });
+
+  /* ---------- control operativo rápido: agotar productos, pausar categorías y pausar pedidos ---------- */
+  app.put('/venues/:slug/staff/products/:id/availability', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'availability.update');
+    const b = z.object({ available: z.boolean() }).strict().parse(req.body);
+    return withContext(cfg.db, ctx, (tx) => setProductAvailable(tx, { tenantId: tenant.id, productId: idParam(req), available: b.available, actorUserId: user.id }));
+  });
+  app.put('/venues/:slug/staff/categories/:id/pause', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'availability.update');
+    const b = z.object({ paused: z.boolean() }).strict().parse(req.body);
+    return withContext(cfg.db, ctx, (tx) => setCategoryPaused(tx, { tenantId: tenant.id, categoryId: idParam(req), paused: b.paused, actorUserId: user.id }));
+  });
+  app.put('/venues/:slug/staff/ordering', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'availability.update');
+    const b = z.object({ paused: z.boolean(), message: z.string().max(200).nullish() }).strict().parse(req.body);
+    return withContext(cfg.db, ctx, (tx) => setOrderingPaused(tx, { tenantId: tenant.id, paused: b.paused, message: b.message, actorUserId: user.id }));
   });
 
   /* ---------- reembolsos: ver los pendientes y fallidos, y reintentar a mano ---------- */
