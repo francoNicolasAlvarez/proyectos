@@ -34,7 +34,7 @@ PostgreSQL 16. Este documento es el diseño; las migraciones ejecutables (Drizzl
 
 ### 2.2 Configuración del local
 
-**tenant_settings** (1 fila por tenant): `tenant_id` (PK), `ordering_paused bool`, `pause_message`, `pickup_mode` (`single_point|per_item`), `acceptance_mode` (`manual|auto`), `acceptance_timeout_seconds` (default 300), `max_concurrent_orders`, `max_orders_per_interval`, `interval_minutes`, `pickup_deadline_minutes`, `default_prep_minutes`, `id_check_on_pickup bool`, `max_order_total_cents` (por defecto 10.000.000 = $100.000), `max_individual_items` (20), `max_combos` (8).
+**tenant_settings** (1 fila por tenant): `tenant_id` (PK), `ordering_paused bool`, `pause_message`, `pickup_mode` (`single_point|per_item`), `acceptance_mode` (`manual|auto`), `acceptance_timeout_seconds` (default 300), `max_concurrent_orders`, `max_orders_per_interval`, `interval_minutes`, `pickup_deadline_minutes`, `default_prep_minutes`, `id_check_on_pickup bool`, `max_order_total_cents` (por defecto 10.000.000 = $100.000), `max_individual_items` (20), `max_combos` (8), `max_order_total_on_pickup_cents` (3.000.000 = $30.000, para pago al retiro), `limits_reviewed_at` (última revisión de los límites) y `payment_window_minutes` (10: tiempo que un pedido sin pagar reserva cupo).
 
 **tenant_payment_methods**: `tenant_id`, `method` (`card_online|payment_app|cash_on_pickup|card_on_pickup`), `enabled`, `config jsonb`. Único `(tenant_id, method)`. En MVP 1 solo se permiten los dos electrónicos (se valida en la aplicación).
 
@@ -78,7 +78,7 @@ Checks: `total_cents >= 0`; coherencia entre `payment_timing` y los estados de p
 
 **order_parts**: `id`, `tenant_id`, `order_id`, `pickup_point_id` nullable, `status` (`preparing|ready|delivered|not_picked_up|cancelled`), `ready_at`, `delivered_at`, `delivered_by`. **Todo pedido tiene al menos una parte**; en `single_point` hay exactamente una.
 
-**order_items**: `id`, `tenant_id`, `order_id`, `order_part_id`, `product_id` (referencia informativa), `name_snapshot`, `unit_price_cents`, `quantity`, `line_total_cents`, `prep_minutes_snapshot`, `notes`.
+**order_items**: `id`, `tenant_id`, `order_id`, `order_part_id`, `product_id` (referencia informativa), `name_snapshot`, `kind_snapshot` (`simple|combo`, para sumar los límites por persona), `unit_price_cents`, `quantity`, `line_total_cents`, `prep_minutes_snapshot`, `notes`.
 
 **order_item_selections**: `id`, `tenant_id`, `order_item_id`, `kind` (`option|combo_choice`), `group_or_slot_name_snapshot`, `name_snapshot`, `price_delta_cents`, `quantity`. Los snapshots garantizan que cambios futuros del catálogo no alteren pedidos pasados.
 

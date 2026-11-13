@@ -75,31 +75,45 @@ function selText(p, sel) {
   return out.join(' · ');
 }
 const cartCount = () => state.cart.reduce((a, l) => a + l.qty, 0);
-function usage() {
+/* Los límites cuentan este pedido MÁS tu pedido abierto en el local (sin entregar): no se esquivan partiendo la compra. */
+function openOrderUsage() {
+  const o = state.order;
+  if (!o || o.finished || o.rejected) return { individual: 0, combos: 0, total: 0 };
   let individual = 0, combos = 0;
+  for (const pt of o.parts) for (const it of pt.items) { if (it.combo) combos += it.qty; else individual += it.qty; }
+  return { individual, combos, total: o.total };
+}
+function usage() {
+  const prior = openOrderUsage();
+  const ratio = LIMITS.maxIndividual / LIMITS.maxCombos;
+  let individual = prior.individual, combos = prior.combos;
   for (const l of state.cart) { if (isCombo(prod(l.pid))) combos += l.qty; else individual += l.qty; }
-  const equivalent = individual + combos * (LIMITS.maxIndividual / LIMITS.maxCombos);
-  const total = cartTotal();
-  return { individual, combos, equivalent, total, totalOk: total <= LIMITS.maxTotal, itemsOk: equivalent <= LIMITS.maxIndividual };
+  const equivalent = individual + combos * ratio;
+  const total = cartTotal() + prior.total;
+  const priorEquivalent = prior.individual + prior.combos * ratio;
+  return { individual, combos, equivalent, total, prior, priorEquivalent, totalOk: total <= LIMITS.maxTotal, itemsOk: equivalent <= LIMITS.maxIndividual };
 }
 const limitsOk = () => { const u = usage(); return u.totalOk && u.itemsOk; };
 
 /* Lista de requisitos al estilo de las contraseñas: cada línea muestra ✓ o ✕ y se actualiza al cambiar el carrito. */
 function limitsBox() {
   const u = usage();
-  const mix = [u.individual ? `${u.individual} producto${u.individual === 1 ? '' : 's'}` : '', u.combos ? `${u.combos} combo${u.combos === 1 ? '' : 's'}` : ''].filter(Boolean).join(' y ');
-  const line = (ok, title, detail) => `<li class="${ok ? 'ok' : 'bad'}"><span class="mark" aria-hidden="true">${ok ? '✓' : '✕'}</span><span><strong>${title}</strong><small>${detail}</small></span><span class="sr-only">${ok ? 'Cumple' : 'No cumple'}</span></li>`;
+  const mix = [u.individual ? u.individual + ' producto' + (u.individual === 1 ? '' : 's') : '', u.combos ? u.combos + ' combo' + (u.combos === 1 ? '' : 's') : ''].filter(Boolean).join(' y ');
+  const line = (ok, title, detail) => '<li class="' + (ok ? 'ok' : 'bad') + '"><span class="mark" aria-hidden="true">' + (ok ? '✓' : '✕') + '</span><span><strong>' + title + '</strong><small>' + detail + '</small></span><span class="sr-only">' + (ok ? 'Cumple' : 'No cumple') + '</span></li>';
+  const hasPrior = u.prior.total > 0;
   const msgs = [];
-  if (!u.totalOk) msgs.push(`El total no puede superar ${fmt(LIMITS.maxTotal)}. El tuyo es ${fmt(u.total)}: quitá productos por ${fmt(u.total - LIMITS.maxTotal)} o más para continuar.`);
-  if (!u.itemsOk) msgs.push(`Superás el máximo de ${LIMITS.maxIndividual} productos o ${LIMITS.maxCombos} combos por pedido (un combo equivale a ${fmtNum(LIMITS.maxIndividual / LIMITS.maxCombos)} productos). Llevás el equivalente a ${fmtNum(u.equivalent)}: quitá el equivalente a ${fmtNum(u.equivalent - LIMITS.maxIndividual)} o más.`);
-  return `<section class="limits" aria-label="Límites del pedido">
-    <h3>Límites del pedido</h3>
-    <ul>
-      ${line(u.totalOk, `Total hasta ${fmt(LIMITS.maxTotal)}`, `Tu total: ${fmt(u.total)}`)}
-      ${line(u.itemsOk, `Hasta ${LIMITS.maxIndividual} productos o ${LIMITS.maxCombos} combos`, `Llevás ${mix || 'nada todavía'} (equivale a ${fmtNum(u.equivalent)})`)}
-    </ul>
-    ${msgs.length ? `<div class="notice error" role="alert">${msgs.map((m) => `<span>${m}</span>`).join('<br>')}</div>` : ''}
-  </section>`;
+  if (!u.totalOk) {
+    msgs.push('El total no puede superar ' + fmt(LIMITS.maxTotal) + '. ' + (hasPrior ? 'Entre este pedido y tu pedido abierto (' + fmt(u.prior.total) + ') llegás a ' + fmt(u.total) : 'El tuyo es ' + fmt(u.total)) + ': quitá productos por ' + fmt(u.total - LIMITS.maxTotal) + ' o más para continuar.');
+  }
+  if (!u.itemsOk) {
+    msgs.push('Superás el máximo de ' + LIMITS.maxIndividual + ' productos o ' + LIMITS.maxCombos + ' combos por pedido (un combo equivale a ' + fmtNum(LIMITS.maxIndividual / LIMITS.maxCombos) + ' productos). ' + (hasPrior ? 'Con tu pedido abierto (equivale a ' + fmtNum(u.priorEquivalent) + ') llevás el equivalente a ' : 'Llevás el equivalente a ') + fmtNum(u.equivalent) + ': quitá el equivalente a ' + fmtNum(u.equivalent - LIMITS.maxIndividual) + ' o más.');
+  }
+  const totalDetail = 'Tu total: ' + fmt(u.total) + (hasPrior ? ' (incluye ' + fmt(u.prior.total) + ' de tu pedido abierto)' : '');
+  const itemsDetail = 'Llevás ' + (mix || 'nada todavía') + ' (equivale a ' + fmtNum(u.equivalent) + ')' + (hasPrior ? ', con tu pedido abierto' : '');
+  return '<section class="limits" aria-label="Límites del pedido"><h3>Límites del pedido</h3><ul>' +
+    line(u.totalOk, 'Total hasta ' + fmt(LIMITS.maxTotal), totalDetail) +
+    line(u.itemsOk, 'Hasta ' + LIMITS.maxIndividual + ' productos o ' + LIMITS.maxCombos + ' combos', itemsDetail) +
+    '</ul>' + (msgs.length ? '<div class="notice error" role="alert">' + msgs.map((m) => '<span>' + m + '</span>').join('<br>') + '</div>' : '') + '</section>';
 }
 const cartTotal = () => state.cart.reduce((a, l) => a + l.qty * unitPrice(prod(l.pid), l.sel), 0);
 // Clave segura para usar dentro de atributos HTML (solo letras, números y separadores simples).
@@ -320,7 +334,7 @@ function createOrder() {
     total: cartTotal(), eta: maxPrep + 3, origin: state.origin, createdAt: Date.now(),
     parts: Object.entries(byPoint).map(([point, lines]) => ({
       point, code: code(), status: 'preparing',
-      items: lines.map((l) => ({ name: prod(l.pid).name, qty: l.qty, detail: selText(prod(l.pid), l.sel) })),
+      items: lines.map((l) => ({ name: prod(l.pid).name, qty: l.qty, detail: selText(prod(l.pid), l.sel), combo: isCombo(prod(l.pid)) })),
     })),
   };
   state.cart = [];

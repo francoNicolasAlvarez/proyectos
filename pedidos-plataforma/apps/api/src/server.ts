@@ -53,7 +53,7 @@ const every = (ms: number, name: string, fn: () => Promise<unknown>) => {
 const timers = [
   every(1_000, 'outbox', () => dispatchOutbox(db, hub)),
   every(30_000, 'refunds', () => processPendingRefunds({ db, provider, webhookSecret: env.MP_WEBHOOK_SECRET, encryptionKey })),
-  every(60_000, 'expire-unpaid', () => expireUnpaidOrders(db, { olderThanMinutes: 15 })),
+  every(30_000, 'expire-unpaid', () => expireUnpaidOrders(db)),
 ];
 
 const close = async () => { timers.forEach(clearInterval); await app.close(); await pool.end(); process.exit(0); };

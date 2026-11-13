@@ -4,10 +4,12 @@ import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { InvalidTransitionError, OrderLimitError, PricingError } from '@pasamanos/shared';
 import { DomainError, withContext, type Database, type RequestContext } from '../src/db';
+import { expireUnpaidOrders } from '../src/payments/payment-service';
 import {
   createOrder, getPickupCredentials, markPartReady, markPaymentApproved, redeemPickup, transitionOrder,
 } from '../src/order-service';
 
+type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const SECRET = 'test-secret';
 let pg: PGlite;
 let db: Database;
@@ -196,15 +198,42 @@ describe('capacidad y horarios', () => {
     expect(await code(place(s, [friesLine(s)], { now: monday13 }))).toBe('CLOSED');
   });
 
-  it('límite de pedidos simultáneos: cuenta los pendientes de aceptación y en curso', async () => {
+  it('límite de pedidos simultáneos: cuentan los pedidos en curso Y los sin pagar dentro de la ventana de pago', async () => {
     const s = await seedTenant({ settings: 'max_concurrent_orders = 1' });
-    const first = await place(s, [friesLine(s)]);                 // sin pagar: todavía no ocupa capacidad
-    const second = await place(s, [friesLine(s)]);
-    await pay(s, first.orderId, first.totalCents);                // ahora ocupa el cupo
+    const first = await place(s, [friesLine(s)]);                           // sin pagar: RESERVA el cupo
+    expect(await code(place(s, [friesLine(s)]))).toBe('CONCURRENT_LIMIT');
+    await pay(s, first.orderId, first.totalCents);                          // pagado: sigue ocupando el cupo
     expect(await code(place(s, [friesLine(s)]))).toBe('CONCURRENT_LIMIT');
     await move(s, first.orderId, 'rejected', { reasonCode: 'capacity_exceeded' });
-    expect(second.orderNumber).toBe(2);
-    expect((await place(s, [friesLine(s)])).orderNumber).toBe(3);  // se liberó el cupo
+    expect((await place(s, [friesLine(s)])).orderNumber).toBe(2);           // se liberó el cupo
+  });
+
+  it('un pedido sin pagar deja de reservar cupo al vencer la ventana de pago y el job lo cancela', async () => {
+    const s = await seedTenant({ settings: 'max_concurrent_orders = 1, payment_window_minutes = 10' });
+    const abandoned = await place(s, [friesLine(s)]);
+    expect(await code(place(s, [friesLine(s)]))).toBe('CONCURRENT_LIMIT');
+    await pg.query("UPDATE orders SET placed_at = now() - interval '11 minutes' WHERE id=$1", [abandoned.orderId]);
+    expect((await place(s, [friesLine(s)])).orderNumber).toBe(2);           // la ventana venció: el cupo se libera solo
+    expect(await expireUnpaidOrders(db, { role: 'app_runtime' })).toBe(1);  // usa la ventana del local (10 min), sin parámetros
+    expect((await one('SELECT operational_status, payment_status FROM orders WHERE id=$1', [abandoned.orderId]))).toMatchObject({ operational_status: 'cancelled', payment_status: 'expired' });
+  });
+
+  it('cancelar el pedido sin pagar libera el cupo de inmediato', async () => {
+    const s = await seedTenant({ settings: 'max_concurrent_orders = 1' });
+    const a = await place(s, [friesLine(s)]);
+    await withContext(db, asCustomer(s), (tx) => transitionOrder(tx, { tenantId: s.id, orderId: a.orderId, to: 'cancelled', actor: 'customer', actorUserId: s.customer }));
+    expect((await place(s, [friesLine(s)])).orderNumber).toBe(2);
+  });
+
+  it('la ventana de pago es propia de cada local', async () => {
+    const short = await seedTenant({ settings: 'max_concurrent_orders = 1, payment_window_minutes = 2' });
+    const long = await seedTenant({ settings: 'max_concurrent_orders = 1, payment_window_minutes = 30' });
+    for (const s of [short, long]) {
+      const o = await place(s, [friesLine(s)]);
+      await pg.query("UPDATE orders SET placed_at = now() - interval '5 minutes' WHERE id=$1", [o.orderId]);
+    }
+    expect((await place(short, [friesLine(short)])).orderNumber).toBe(2);                    // 5 min > 2: ya no reserva
+    expect(await code(place(long, [friesLine(long)]))).toBe('CONCURRENT_LIMIT');            // 5 min < 30: sigue reservando
   });
 
   it('límite por intervalo', async () => {
@@ -476,11 +505,14 @@ describe('preparación y retiro con QR', () => {
 describe('límites por pedido (gasto y cantidad)', () => {
   const limitErr = async (p: Promise<unknown>) => { try { await p; } catch (e) { return e as OrderLimitError; } return null; };
   const orders = async (s: Seed) => Number((await one('SELECT count(*)::int n FROM orders WHERE tenant_id=$1', [s.id])).n);
+  /** Cierra los pedidos abiertos para probar cada caso por separado (los límites suman los pedidos abiertos de la persona). */
+  const clear = (s: Seed) => pg.query("UPDATE orders SET operational_status='cancelled' WHERE tenant_id=$1", [s.id]);
 
   it('un pedido de exactamente $100.000 se acepta y uno de más se rechaza sin crear nada', async () => {
     const s = await seedTenant();
     await pg.query('UPDATE products SET base_price_cents = 1000000 WHERE id=$1', [s.fries]);     // $10.000 c/u
     expect((await place(s, [friesLine(s, 10)])).totalCents).toBe(10_000_000);                      // exactamente $100.000
+    await clear(s);
     const before = await orders(s);
     await pg.query('UPDATE products SET base_price_cents = 1000001 WHERE id=$1', [s.fries]);     // $10.000,01 c/u
     const e = await limitErr(place(s, [friesLine(s, 10)]));
@@ -494,6 +526,7 @@ describe('límites por pedido (gasto y cantidad)', () => {
     await pg.query('UPDATE products SET base_price_cents = 1000 WHERE tenant_id=$1', [s.id]);   // baratos: solo importa la cantidad
     const lines = (a: number, b: number) => [friesLine(s, a), { productId: s.lemonade, quantity: b, selections: {} }];
     expect((await place(s, lines(10, 10))).orderNumber).toBe(1);
+    await clear(s);
     const e = await limitErr(place(s, lines(10, 11)));
     expect(e?.violations).toEqual([{ code: 'ORDER_ITEM_LIMIT_EXCEEDED', limit: 20, actual: 21 }]);
   });
@@ -504,14 +537,17 @@ describe('límites por pedido (gasto y cantidad)', () => {
     await pg.query('UPDATE products SET base_price_cents = 1000 WHERE id=$1', [s.fries]);
     const combo = (n: number) => ({ productId: s.lemonade, quantity: n, selections: {} });
     expect((await place(s, [combo(8)])).orderNumber).toBe(1);
+    await clear(s);
     expect((await limitErr(place(s, [combo(9)])))?.code).toBe('ORDER_ITEM_LIMIT_EXCEEDED');
     expect((await place(s, [combo(5), friesLine(s, 7)])).orderNumber).toBe(2);                   // 12,5 + 7 = 19,5
+    await clear(s);
     expect((await limitErr(place(s, [combo(5), friesLine(s, 8)])))?.violations[0]).toMatchObject({ actual: 20.5 });
   });
 
   it('cada local define sus propios límites', async () => {
     const strict = await seedTenant({ settings: 'max_order_total_cents = 1000000, max_individual_items = 2, max_combos = 1' });   // $10.000, 2 productos
     expect((await place(strict, [friesLine(strict, 1)])).totalCents).toBe(520_000);                              // $5.200 entra
+    await clear(strict);
     expect((await limitErr(place(strict, [friesLine(strict, 2)])))?.code).toBe('ORDER_TOTAL_LIMIT_EXCEEDED');   // $10.400 supera los $10.000
     // 3 limonadas ($9.600) cumplen el gasto pero superan los 2 productos permitidos en este local
     const e = await limitErr(place(strict, [{ productId: strict.lemonade, quantity: 3, selections: {} }]));
@@ -520,11 +556,74 @@ describe('límites por pedido (gasto y cantidad)', () => {
     expect((await place(wide, [friesLine(wide, 50)])).totalCents).toBe(50 * 520_000);
   });
 
-  it('el límite se valida contra el precio real del catálogo, incluidos los extras', async () => {
+  it('el límite se valida contra el precio real del catálogo, incluidos los extras', async () => {   // (un solo pedido abierto por caso)
     const s = await seedTenant({ settings: 'max_order_total_cents = 1500000' });                 // $15.000
     await pg.query("UPDATE options SET price_delta_cents = 700000 WHERE name = 'Jarra' AND tenant_id = $1", [s.id]);
     expect(await limitErr(place(s, [beerLine(s, 1, 'liter')]))).toBeNull();                      // 4.200 + 7.000 = 11.200
+    await clear(s);
     expect((await limitErr(place(s, [beerLine(s, 2, 'liter')])))?.code).toBe('ORDER_TOTAL_LIMIT_EXCEEDED');
+  });
+});
+
+describe('límite por persona: se suman los pedidos abiertos en el local', () => {
+  const limitErr = async (p: Promise<unknown>) => { try { await p; } catch (e) { return e as OrderLimitError; } return null; };
+  const cheap = (s: Seed, price = 1_000_000) => pg.query('UPDATE products SET base_price_cents = $2 WHERE id = $1', [s.fries, price]);   // $10.000 c/u
+  const asUser = (s: Seed, userId: string): RequestContext => ({ tenantId: s.id, userId, role: 'app_runtime' });
+  const placeAs = (s: Seed, userId: string, items: unknown[]) => withContext(db, asUser(s, userId), (tx) =>
+    createOrder(tx, { tenantId: s.id, userId, idempotencyKey: 'u' + ++keySeq, paymentMethod: 'payment_app', items: items as never }));
+
+  it('no se esquiva partiendo la compra: un segundo pedido que con el primero supera $100.000 se rechaza', async () => {
+    const s = await seedTenant(); await cheap(s);
+    await place(s, [friesLine(s, 9)]);                                         // $90.000 abiertos
+    const e = await limitErr(place(s, [friesLine(s, 2)]));                      // +$20.000 = $110.000
+    expect(e?.violations).toEqual([{ code: 'ORDER_TOTAL_LIMIT_EXCEEDED', limit: 10_000_000, actual: 11_000_000, alreadyOpen: 9_000_000 }]);
+    expect((await place(s, [friesLine(s, 1)])).orderNumber).toBe(2);           // $10.000 más: justo $100.000
+  });
+
+  it('también suma la cantidad, y los combos abiertos cuentan 2,5', async () => {
+    const s = await seedTenant({ settings: 'max_order_total_cents = 100000000' });
+    await pg.query("UPDATE products SET base_price_cents = 1000, kind = 'combo' WHERE id=$1", [s.lemonade]);
+    await pg.query('UPDATE products SET base_price_cents = 1000 WHERE id=$1', [s.fries]);
+    await place(s, [{ productId: s.lemonade, quantity: 4, selections: {} }]);   // 4 combos abiertos = 10 productos
+    expect(await limitErr(place(s, [friesLine(s, 10)]))).toBeNull();            // 10 + 10 = 20
+    const e = await limitErr(place(s, [friesLine(s, 1)]));                      // 21
+    expect(e?.violations).toEqual([{ code: 'ORDER_ITEM_LIMIT_EXCEEDED', limit: 20, actual: 21, alreadyOpen: 20 }]);
+  });
+
+  it('al entregarse o cancelarse un pedido, deja de contar', async () => {
+    const s = await seedTenant(); await cheap(s);
+    const a = await place(s, [friesLine(s, 9)]);
+    expect(await limitErr(place(s, [friesLine(s, 2)]))).toBeInstanceOf(OrderLimitError);
+    await withContext(db, asCustomer(s), (tx) => transitionOrder(tx, { tenantId: s.id, orderId: a.orderId, to: 'cancelled', actor: 'customer', actorUserId: s.customer }));
+    expect(await limitErr(place(s, [friesLine(s, 2)]))).toBeNull();
+    await pg.query("UPDATE orders SET operational_status='delivered' WHERE tenant_id=$1", [s.id]);   // entregado: no cuenta
+    expect(await limitErr(place(s, [friesLine(s, 9)]))).toBeNull();
+  });
+
+  it('un pedido sin pagar cuenta solo dentro de la ventana de pago', async () => {
+    const s = await seedTenant(); await cheap(s);
+    const a = await place(s, [friesLine(s, 9)]);
+    expect(await limitErr(place(s, [friesLine(s, 2)]))).toBeInstanceOf(OrderLimitError);
+    await pg.query("UPDATE orders SET placed_at = now() - interval '11 minutes' WHERE id=$1", [a.orderId]);
+    expect(await limitErr(place(s, [friesLine(s, 2)]))).toBeNull();            // el carrito abandonado ya no bloquea a la persona
+  });
+
+  it('los pedidos de otras personas y de otros locales no cuentan', async () => {
+    const a = await seedTenant(); const b = await seedTenant(); await cheap(a); await cheap(b);
+    const other = (await one("INSERT INTO users (email, name) VALUES ('otra@x.com','O') RETURNING id")).id;
+    await placeAs(a, other, [friesLine(a, 10)]);                                // otra persona, mismo local: $100.000
+    expect(await limitErr(place(a, [friesLine(a, 10)]))).toBeNull();           // no me afecta
+    await placeAs(b, a.customer, [friesLine(b, 10)]);                           // mi pedido en OTRO local
+    const mine = await place(a, [friesLine(a, 0 + 1)]).catch((e) => e);         // en este local ya tengo $100.000 abiertos
+    expect((mine as OrderLimitError).violations?.[0]).toMatchObject({ code: 'ORDER_TOTAL_LIMIT_EXCEEDED', alreadyOpen: 10_000_000 });
+  });
+
+  it('guarda el tipo (individual o combo) de cada ítem para poder sumar después', async () => {
+    const s = await seedTenant();
+    await pg.query("UPDATE products SET kind = 'combo' WHERE id=$1", [s.lemonade]);
+    const o = await place(s, [friesLine(s), { productId: s.lemonade, quantity: 1, selections: {} }]);
+    const kinds = (await pg.query<Row>('SELECT name_snapshot, kind_snapshot FROM order_items WHERE order_id=$1 ORDER BY name_snapshot', [o.orderId])).rows;
+    expect(kinds.map((k) => [k.name_snapshot, k.kind_snapshot])).toEqual([['Limonada', 'combo'], ['Papas fritas', 'simple']]);
   });
 });
 

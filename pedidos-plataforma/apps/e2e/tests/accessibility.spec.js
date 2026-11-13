@@ -4,6 +4,9 @@ const { customerUrl, panelUrl } = require('./helpers');
 
 /** Falla ante violaciones WCAG A/AA de impacto serio o crítico, e informa dónde están. */
 async function expectAccessible(page, label) {
+  // Los avisos temporales se desvanecen: medir su contraste a mitad de la transición da falsos positivos.
+  await page.waitForFunction(() => !document.querySelector('#toast.show'), undefined, { timeout: 5000 });
+  await page.waitForTimeout(300);
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     // La barra oscura de "Prototipo" es una ayuda de demostración, no parte del producto.

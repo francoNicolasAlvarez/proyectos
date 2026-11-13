@@ -5,7 +5,7 @@
  */
 import {
   assertOperationalTransition, assertPartTransition, assertPaymentTransition, checkCapacity, deriveFromParts,
-  estimatePrepMinutes, isOpenAt, planParts, priceCart, requiresRefund, resolvePickupPoint,
+  estimatePrepMinutes, isOpenAt, limitsFor, planParts, priceCart, requiresRefund, resolvePickupPoint,
   type Actor, type CancellationReasonCode, type LineInput, type OperationalStatus, type OptionGroupDef, type ProductDef,
 } from '@pasamanos/shared';
 import { DomainError, num, type Queryable } from './db';
@@ -75,8 +75,13 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
      FROM (SELECT (COALESCE($2::timestamptz, now()) AT TIME ZONE $1) AS l) x`,
     [tenant.timezone, input.now?.toISOString() ?? null])).rows[0] as Row;
   const hours = (await tx.query<Row>('SELECT weekday, opens_at::text AS opens, closes_at::text AS closes FROM opening_hours WHERE tenant_id=$1', [tenantId])).rows;
+  // Un pedido sin pagar RESERVA cupo mientras dura la ventana de pago (evita vender más de lo que se puede preparar
+  // cuando muchos pedidos se crean antes de pagarse). Vencida la ventana, deja de contar y un job lo cancela.
   const active = num((await tx.query<Row>(
-    "SELECT count(*)::int AS n FROM orders WHERE tenant_id=$1 AND operational_status IN ('pending_acceptance','accepted','preparing','ready')", [tenantId])).rows[0]?.n);
+    `SELECT count(*)::int AS n FROM orders WHERE tenant_id=$1 AND (
+       operational_status IN ('pending_acceptance','accepted','preparing','ready')
+       OR (operational_status = 'awaiting_payment' AND placed_at > now() - make_interval(mins => $2::int)))`,
+    [tenantId, settings.payment_window_minutes])).rows[0]?.n);
   const inInterval = settings.interval_minutes
     ? num((await tx.query<Row>(
       "SELECT count(*)::int AS n FROM orders WHERE tenant_id=$1 AND operational_status NOT IN ('cancelled','rejected') AND placed_at > now() - make_interval(mins => $2::int)",
@@ -121,9 +126,20 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
   if (!activeMenu) throw new DomainError('NO_ACTIVE_MENU');
   if (prodRows.some((p) => p.menu_id !== activeMenu.menuId)) throw new DomainError('PRODUCT_NOT_IN_ACTIVE_MENU');
   // Límites por pedido (gasto y cantidad), propios de cada local; por defecto $100.000 y 20 productos u 8 combos.
-  const cart = priceCart(catalog, input.items, {
+  // El límite cuenta este pedido MÁS los pedidos abiertos de la misma persona en este local (no se esquiva partiendo la compra).
+  const open = (await tx.query<Row>(
+    `SELECT coalesce(sum(CASE WHEN i.kind_snapshot = 'combo' THEN 0 ELSE i.quantity END), 0)::int AS individual,
+            coalesce(sum(CASE WHEN i.kind_snapshot = 'combo' THEN i.quantity ELSE 0 END), 0)::int AS combos,
+            coalesce(sum(i.line_total_cents), 0)::text AS total
+     FROM orders o JOIN order_items i ON i.tenant_id = o.tenant_id AND i.order_id = o.id
+     WHERE o.tenant_id = $1 AND o.user_id = $2 AND (
+       o.operational_status IN ('pending_acceptance','accepted','preparing','ready')
+       OR (o.operational_status = 'awaiting_payment' AND o.placed_at > now() - make_interval(mins => $3::int)))`,
+    [tenantId, userId, settings.payment_window_minutes])).rows[0] as Row;
+  const cart = priceCart(catalog, input.items, limitsFor({
     maxTotalCents: num(settings.max_order_total_cents), maxIndividualItems: num(settings.max_individual_items), maxCombos: num(settings.max_combos),
-  });
+    maxTotalOnPickupCents: num(settings.max_order_total_on_pickup_cents),
+  }, 'prepaid'), { individualItems: num(open.individual), combos: num(open.combos), totalCents: num(open.total) });
 
   // 5. Origen informativo (nunca destino de entrega)
   let originName: string | null = null;
@@ -137,7 +153,7 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
   const points = (await tx.query<Row>('SELECT id, is_default FROM pickup_points WHERE tenant_id=$1 AND active ORDER BY is_default DESC, sort_order, name', [tenantId])).rows;
   const defaultPoint = points.find((p) => p.is_default)?.id ?? null;
   const lines = cart.lines.map((l) => ({
-    ...l, name: catalog.get(l.productId)?.name ?? '', prep: catalog.get(l.productId)?.prepMinutes ?? 0,
+    ...l, name: catalog.get(l.productId)?.name ?? '', prep: catalog.get(l.productId)?.prepMinutes ?? 0, kind: catalog.get(l.productId)?.kind ?? 'simple',
     pickupPointId: resolvePickupPoint(pickupByProduct.get(l.productId), null, defaultPoint),
   }));
   const plan = planParts(lines, settings.pickup_mode, points.map((p) => p.id));
@@ -157,9 +173,9 @@ export async function createOrder(tx: Queryable, input: CreateOrderInput): Promi
       [tenantId, order.id, part.pickupPointId])).rows[0]?.id;
     for (const l of part.items) {
       const itemId = (await tx.query<Row>(
-        `INSERT INTO order_items (tenant_id, order_id, order_part_id, product_id, name_snapshot, unit_price_cents, quantity, line_total_cents, prep_minutes_snapshot)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-        [tenantId, order.id, partId, l.productId, l.name, l.unitPriceCents, l.quantity, l.lineTotalCents, l.prep])).rows[0]?.id;
+        `INSERT INTO order_items (tenant_id, order_id, order_part_id, product_id, name_snapshot, kind_snapshot, unit_price_cents, quantity, line_total_cents, prep_minutes_snapshot)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [tenantId, order.id, partId, l.productId, l.name, l.kind, l.unitPriceCents, l.quantity, l.lineTotalCents, l.prep])).rows[0]?.id;
       for (const c of l.chosen) {
         await tx.query(
           "INSERT INTO order_item_selections (tenant_id, order_item_id, kind, group_name_snapshot, name_snapshot, price_delta_cents) VALUES ($1,$2,'option',$3,$4,$5)",

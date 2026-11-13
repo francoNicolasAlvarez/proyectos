@@ -13,7 +13,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 | 5. Backend | **Núcleo de negocio y capa HTTP implementados y probados**; falta ejecutar el arranque contra PostgreSQL real y el cobro (preferencia de pago) |
 | 6. Frontend | No iniciado (solo prototipos) |
 | 7. Pagos y QR | Lógica implementada y probada con proveedor simulado; **falta verificar contra el sandbox real de Mercado Pago** |
-| 8. Pruebas | Suite automatizada de 353 pruebas (más 7 de concurrencia opcionales, no ejecutadas), ejecutable en CI |
+| 8. Pruebas | Suite automatizada de 395 pruebas (más 7 de concurrencia opcionales, no ejecutadas), ejecutable en CI |
 | 9. Despliegue | No iniciado |
 
 ## 2. Qué existe
@@ -22,7 +22,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 - **Base de datos** (`apps/api/db`): 36 tablas, claves foráneas compuestas por local, Row-Level Security en las 30 tablas con datos por local (más la política de lectura abierta del directorio de cuentas), tablas de solo inserción (auditoría e historial), restricciones de coherencia entre pago y estado.
 - **Servicios** (`apps/api/src`): crear pedido (idempotente, capacidad, horarios, menú vigente, snapshots de precios); confirmar pago; aceptar, rechazar y cancelar con reembolso; preparar; asignar punto de retiro; retirar con QR de un solo uso; webhook de Mercado Pago (firma, deduplicación, consulta al proveedor, importe verificado); vencimiento de pedidos sin pagar; trabajador de reembolsos con reintentos; autenticación y sesiones; menús por evento; consultas de menú público, cola del local y seguimiento del cliente; consumidor del outbox que genera las notificaciones del cliente por cada hito (pago aprobado, recibido, aceptado, en preparación, listo con punto de retiro, entregado, rechazo o cancelación con motivo, reembolso) y las difunde por canales de usuario y de local.
 - **Prototipos** (`docs/ux/prototype`): app del cliente y panel del local, conectados entre sí por almacenamiento local del navegador.
-- **Pruebas**: 84 (dominio) + 133 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 104 (E2E y accesibilidad con Playwright en móvil y tablet).
+- **Pruebas**: 97 (dominio) + 158 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 108 (E2E y accesibilidad con Playwright en móvil y tablet).
 
 ## 3. Cómo ejecutarlo
 
@@ -42,24 +42,25 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 1. **Herramientas de prueba:** Playwright (E2E y accesibilidad con axe-core), Vitest y `node:test`, PGlite.
 2. **Hosting provisional:** Railway más Cloudflare (Pages y R2). No contratado ni verificado.
 3. **QR de retiro firmado con HMAC** en lugar de aleatorio con hash, para que el cliente pueda volver a mostrar su QR (enmienda en el ADR 0005). Hace crítico el secreto del servidor.
-4. **Capacidad:** los pedidos sin pagar no ocupan cupo; sí los pendientes de aceptación, aceptados, en preparación y listos.
+4. **Capacidad:** un pedido sin pagar RESERVA cupo durante la ventana de pago del local (10 minutos por defecto, configurable); pasada la ventana deja de contar y un job lo cancela. Antes no contaba y se podía sobrevender cuando muchos pedidos se creaban antes de pagarse. Costo: un carrito abandonado bloquea cupo hasta 10 minutos.
 5. **Un pago rechazado no cancela el pedido** (el cliente puede reintentar); los pedidos sin pagar se cancelan por vencimiento.
 6. **Un pago que llega tarde** (pedido cancelado o vencido) se registra y se reembolsa.
 7. **Fuera de la ventana de pedidos de un evento** rige el menú habitual del local.
 8. **Contraseñas con scrypt** de Node en lugar de argon2 (evita compilación nativa en Windows). Costo 2^15.
 9. **Declaración de mayoría de edad obligatoria** al registrarse.
 10. **Nombre de marca y logo:** los definió el responsable; el logo se revisó visualmente solo en captura.
-11. **Límites por pedido (pedido posterior):** $100.000 de gasto y 20 productos individuales u 8 combos. "20 u 8" se implementó como equivalencia (un combo = 2,5 productos, se pueden mezclar), y los tres valores son configurables por local (`tenant_settings`). Se aplican por pedido, no por persona.
+11. **Límites por pedido (pedido posterior):** $100.000 de gasto y 20 productos individuales u 8 combos. "20 u 8" se implementó como equivalencia (un combo = 2,5 productos, se pueden mezclar). Los límites **suman los pedidos abiertos de la misma persona en el local** (sin entregar, y los sin pagar solo dentro de la ventana de pago), así no se esquivan partiendo la compra. Son configurables por local, con aviso de coherencia contra el catálogo y de revisión cada 60 días por inflación. Con pago al retiro (MVP 2) rige además un tope de gasto menor ($30.000 por defecto).
 
 ## 5. Hallazgos durante el trabajo
 
-- **Los dos límites interactúan:** un combo de más de $12.500 hace que el tope de gasto salte antes que el de 8 combos (con el combo de ejemplo de $12.900, 8 combos suman $103.200). Con productos baratos manda el tope de cantidad.
-- **El límite es por pedido, no por persona:** quien quiera gastar más puede hacer varios pedidos seguidos. Una opción sería sumar los pedidos abiertos (sin entregar) de la misma persona en el local.
+- **Los dos límites interactuaban (resuelto con un aviso):** un combo de más de $12.500 hace que el tope de gasto salte antes que el de 8 combos (con el combo de ejemplo de $12.900, 8 combos suman $103.200). Ahora `GET /venues/:slug/staff/limits` informa al local qué productos hacen inalcanzable un tope (`COMBO_LIMIT_UNREACHABLE`, `PRODUCT_EXCEEDS_TOTAL`, `ITEM_LIMIT_UNREACHABLE`) para que ajuste precios o topes. El sistema no los cambia solo: es decisión del local.
+- **El límite era por pedido y no por persona (resuelto):** ahora se suma el pedido nuevo más los pedidos abiertos de la persona en ese local. Quien ya entregó o canceló no queda penalizado. Sigue siendo posible esquivarlo entre locales distintos, o esperando a que se entregue el primer pedido, lo cual es razonable.
+- **Inflación (resuelto en parte):** los topes en pesos se desactualizan. Cada local tiene fecha de última revisión y el informe de límites avisa (`reviewDue`) pasados 60 días; el propietario confirma que siguen vigentes o los cambia, y queda auditado. No hay ajuste automático por índice: sería una decisión de producto.
 
 - **Carrito del prototipo:** los botones de cantidad y eliminar no funcionaban (clave con comillas rota en un atributo HTML). Lo detectó la primera prueba E2E.
 - **Falta de RLS** en `provider_account_directory`: la prueba que exige RLS en toda tabla con `tenant_id` lo detectó.
 - **IDOR entre clientes (seguridad):** con contexto de local fijado, la política de seguridad por fila deja ver todos los pedidos del local, de modo que un cliente podía ver o cancelar el pedido de otro adivinando su id. Corregido con verificación explícita de propiedad en `getCustomerOrder` y `transitionOrder`. **Regla para la capa HTTP:** las lecturas del cliente deben pasar su `userId` y las rutas de cliente no deben depender solo de RLS.
-- **Capacidad: posible sobreventa (sin corregir, decisión de producto).** El cupo de pedidos simultáneos cuenta solo pedidos ya pagados y en curso. Muchos pedidos creados a la vez antes de pagar pueden superar el límite al pagarse. Opción: contar como "reservados" los pedidos sin pagar de los últimos N minutos (con el costo de que carritos abandonados bloqueen cupo durante ese lapso).
+- **Capacidad: sobreventa (resuelto):** los pedidos sin pagar reservan cupo durante la ventana de pago. Con varias conexiones reales la verificación se serializa por el bloqueo de `tenant_settings`, pero esa prueba sigue sin ejecutarse (ver la limitación de concurrencia real).
 - **Idempotencia bajo concurrencia (corregido en el código, sin verificar con carreras reales):** la clave se re-verifica tras tomar el bloqueo del local.
 - Un commit intermedio se subió con una prueba fallando (la de RLS anterior); se corrigió en el commit siguiente.
 
@@ -90,6 +91,6 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 - Plazo de retención de datos de pagos (D3 en `docs/database-design.md`).
 - Hosting definitivo y presupuesto.
 - Confirmar que fuera de la ventana de un evento se vende el menú habitual.
-- ¿El límite debe ser por persona (sumando pedidos abiertos) y no solo por pedido? ¿Y debe actualizarse automáticamente con la inflación o lo revisa cada local?
-- Pago al retiro (MVP 2): conviene un tope de gasto menor, porque el local prepara sin cobrar.
+- ¿La ventana de pago de 10 minutos es adecuada? Más corta libera cupo antes pero cancela pagos lentos; hay que alinearla con el vencimiento de la preferencia de pago de Mercado Pago.
+- Pago al retiro (MVP 2): el tope de $30.000 es un valor propuesto; la lógica de ese medio de pago todavía no está implementada.
 - Política de pedidos no retirados (plazo y reembolso) y de "strikes" (MVP 2).

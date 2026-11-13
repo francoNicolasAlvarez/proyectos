@@ -141,6 +141,12 @@ CREATE TABLE tenant_settings (
   max_order_total_cents bigint NOT NULL DEFAULT 10000000 CHECK (max_order_total_cents > 0),
   max_individual_items integer NOT NULL DEFAULT 20 CHECK (max_individual_items > 0),
   max_combos integer NOT NULL DEFAULT 8 CHECK (max_combos > 0),
+  -- Con pago al retiro el local prepara sin haber cobrado: tope de gasto menor ($30.000 por defecto).
+  max_order_total_on_pickup_cents bigint NOT NULL DEFAULT 3000000 CHECK (max_order_total_on_pickup_cents > 0),
+  -- Los topes en pesos se desactualizan con la inflación: se avisa al local cuando pasan 60 días sin revisarlos.
+  limits_reviewed_at timestamptz NOT NULL DEFAULT now(),
+  -- Un pedido sin pagar reserva cupo solo durante esta ventana; después se cancela y el cupo se libera.
+  payment_window_minutes integer NOT NULL DEFAULT 10 CHECK (payment_window_minutes BETWEEN 1 AND 60),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -451,6 +457,7 @@ CREATE TABLE order_items (
   order_part_id uuid NOT NULL,
   product_id uuid,   -- referencia informativa; los datos vigentes son los snapshots
   name_snapshot text NOT NULL,
+  kind_snapshot text NOT NULL DEFAULT 'simple' CHECK (kind_snapshot IN ('simple', 'combo')),   -- para sumar los límites por persona
   unit_price_cents bigint NOT NULL CHECK (unit_price_cents >= 0),
   quantity integer NOT NULL CHECK (quantity >= 1),
   line_total_cents bigint NOT NULL CHECK (line_total_cents >= 0),

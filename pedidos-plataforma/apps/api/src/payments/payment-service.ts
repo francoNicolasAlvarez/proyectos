@@ -88,11 +88,14 @@ export async function handlePaymentWebhook(deps: PaymentDeps, req: WebhookReques
 }
 
 /** Cancela los pedidos que nunca se pagaron. Un pago tardío posterior se reembolsa (markPaymentApproved). */
-export async function expireUnpaidOrders(db: Database, opts: { olderThanMinutes: number; limit?: number; role?: string }): Promise<number> {
+/** Por defecto usa la ventana de pago de cada local (`payment_window_minutes`): la misma que reserva cupo. */
+export async function expireUnpaidOrders(db: Database, opts: { olderThanMinutes?: number; limit?: number; role?: string } = {}): Promise<number> {
   const stale = await withContext(db, { admin: true, role: opts.role }, async (tx) =>
     (await tx.query<Row>(
-      `SELECT id, tenant_id FROM orders WHERE operational_status='awaiting_payment' AND payment_status='pending'
-       AND placed_at < now() - make_interval(mins => $1::int) ORDER BY placed_at LIMIT $2`, [opts.olderThanMinutes, opts.limit ?? 100])).rows);
+      `SELECT o.id, o.tenant_id FROM orders o JOIN tenant_settings s ON s.tenant_id = o.tenant_id
+       WHERE o.operational_status='awaiting_payment' AND o.payment_status='pending'
+         AND o.placed_at < now() - make_interval(mins => COALESCE($1::int, s.payment_window_minutes)) ORDER BY o.placed_at LIMIT $2`,
+      [opts.olderThanMinutes ?? null, opts.limit ?? 100])).rows);
   let n = 0;
   for (const o of stale) {
     await withContext(db, { tenantId: o.tenant_id, role: opts.role }, async (tx) => {

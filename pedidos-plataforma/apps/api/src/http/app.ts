@@ -8,6 +8,7 @@ import { z, ZodError } from 'zod';
 import { CANCELLATION_REASONS, InvalidTransitionError, OrderLimitError, PricingError, can, type Action } from '@pasamanos/shared';
 import { SESSION_DAYS, authenticate, login, logout, registerUser, roleIn, type AuthUser } from '../auth';
 import { DomainError, withContext, type Database } from '../db';
+import { confirmLimitsReviewed, getLimitsReport, updateLimits } from '../limits-service';
 import { resolveTenantBySlug } from '../menu';
 import { listNotifications, markNotificationsRead } from '../notifications';
 import { createOrder, markPartReady, redeemPickup, transitionOrder } from '../order-service';
@@ -54,6 +55,10 @@ const schemas = {
   accept: z.object({ etaMinutes: z.number().int().min(1).max(240).optional() }).default({}),
   reject: z.object({ reasonCode: z.enum(reasonCodes), reasonText: z.string().max(300).optional() }),
   ready: z.object({ pickupPointId: uuid.optional() }).default({}),
+  limits: z.object({
+    maxTotalCents: z.number().int().optional(), maxIndividualItems: z.number().int().optional(), maxCombos: z.number().int().optional(),
+    maxTotalOnPickupCents: z.number().int().optional(), paymentWindowMinutes: z.number().int().optional(),
+  }).strict(),
   redeem: z.object({ token: z.string().max(200).optional(), shortCode: z.string().max(12).optional() }),
 };
 
@@ -222,6 +227,22 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
     const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'orders.deliver');
     const b = schemas.redeem.parse(req.body);
     return withContext(cfg.db, ctx, (tx) => redeemPickup(tx, { tenantId: tenant.id, staffUserId: user.id, token: b.token, shortCode: b.shortCode }));
+  });
+
+  /* ---------- límites por pedido del local ---------- */
+  // El informe avisa si los topes se pisan con los precios (p. ej. combos que impiden llegar a 8) y si toca revisarlos por inflación.
+  app.get('/venues/:slug/staff/limits', async (req) => {
+    const { tenant, ctx } = await staff(req, (req.params as { slug: string }).slug, 'catalog.manage');
+    return withContext(cfg.db, ctx, (tx) => getLimitsReport(tx, tenant.id));
+  });
+  app.put('/venues/:slug/staff/limits', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'venue.configure');
+    const b = schemas.limits.parse(req.body);
+    return withContext(cfg.db, ctx, (tx) => updateLimits(tx, { tenantId: tenant.id, actorUserId: user.id, changes: b }));
+  });
+  app.post('/venues/:slug/staff/limits/confirm', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'venue.configure');
+    return withContext(cfg.db, ctx, (tx) => confirmLimitsReviewed(tx, { tenantId: tenant.id, actorUserId: user.id }));
   });
 
   /* ---------- webhook del proveedor de pagos (sin cookie: se autentica por firma) ---------- */

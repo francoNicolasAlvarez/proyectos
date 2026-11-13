@@ -310,3 +310,75 @@ test.describe('Límites del pedido ($100.000, 20 productos u 8 combos)', () => {
     await expect(page.locator('.cartbar.over')).toContainText('⚠');
   });
 });
+
+test.describe('Límites por persona: se suma el pedido abierto', () => {
+  async function addCombo(page) {
+    await page.getByRole('button', { name: 'Combos' }).click();
+    await page.getByRole('button', { name: 'Agregar Combo 3' }).click();
+    await page.getByRole('radio', { name: 'Rubia' }).first().click();
+    await page.getByRole('radio', { name: 'Rubia' }).last().click();
+    await page.getByRole('button', { name: /^Agregar ·/ }).click();
+  }
+  async function setQty(page, productName, qty) {
+    const group = page.getByRole('group', { name: `Cantidad de ${productName}` });
+    const current = Number((await group.locator('span').textContent()).trim());
+    const button = group.getByRole('button', { name: qty > current ? 'Agregar uno' : 'Quitar uno' });
+    for (let i = 0; i < Math.abs(qty - current); i++) await button.click();
+  }
+
+  test('con $90.300 en un pedido abierto, un segundo pedido que suma más de $100.000 se bloquea hasta que el primero se entregue', async ({ page }) => {
+    // Primer pedido: 7 combos = $90.300, pagado y en curso
+    await addCombo(page);
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await setQty(page, 'Combo 3', 7);
+    await page.getByRole('button', { name: 'Continuar al pago' }).click();
+    await page.getByRole('button', { name: /^Pagar/ }).click();
+    await expect(page.getByRole('heading', { name: 'Esperando al local' })).toBeVisible({ timeout: 8000 });
+
+    // Segundo pedido: 3 cervezas = $12.600 → $102.900 entre ambos
+    await page.getByRole('button', { name: 'Pedir algo más' }).click();
+    await page.getByRole('button', { name: 'Cervezas' }).click();
+    await addWithOption(page, 'Rubia Lager', /Pinta/);
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await setQty(page, 'Rubia Lager', 3);
+
+    const rows = page.locator('.limits li');
+    await expect(rows.nth(0)).toHaveClass(/bad/);
+    await expect(rows.nth(0)).toContainText('de tu pedido abierto');
+    await expect(page.locator('.limits [role="alert"]')).toContainText('Entre este pedido y tu pedido abierto');
+    await expect(page.getByRole('button', { name: 'Revisá los límites del pedido' })).toBeDisabled();
+
+    // Con 1 cerveza ($4.200) sí entra: $94.500 en total
+    await setQty(page, 'Rubia Lager', 1);
+    await expect(rows.nth(0)).toHaveClass(/ok/);
+    await expect(page.getByRole('button', { name: 'Continuar al pago' })).toBeEnabled();
+
+    // Al entregarse el primer pedido, deja de contar
+    await setQty(page, 'Rubia Lager', 3);
+    await expect(rows.nth(0)).toHaveClass(/bad/);
+    const next = page.getByRole('button', { name: 'Avanzar estado' });
+    for (let i = 0; i < 4; i++) await next.click();                       // aceptado → preparación → listo → entregado
+    await page.getByRole('button', { name: 'Hacer otro pedido' }).click();
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await expect(page.locator('.limits li').nth(0)).toHaveClass(/ok/);
+    await expect(page.getByRole('button', { name: 'Continuar al pago' })).toBeEnabled();
+  });
+
+  test('un pedido rechazado por el local tampoco cuenta', async ({ page }) => {
+    await addCombo(page);
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await setQty(page, 'Combo 3', 7);
+    await page.getByRole('button', { name: 'Continuar al pago' }).click();
+    await page.getByRole('button', { name: /^Pagar/ }).click();
+    await expect(page.getByRole('heading', { name: 'Esperando al local' })).toBeVisible({ timeout: 8000 });
+    await page.getByRole('button', { name: 'Simular rechazo' }).click();
+    await page.getByRole('button', { name: 'Volver al menú' }).last().click();   // el botón principal (el otro es la flecha)
+    await page.getByRole('button', { name: 'Combos' }).click();
+    await page.getByRole('button', { name: 'Agregar Combo 3' }).click();
+    await page.getByRole('radio', { name: 'Rubia' }).first().click();
+    await page.getByRole('radio', { name: 'Rubia' }).last().click();
+    await page.getByRole('button', { name: /^Agregar ·/ }).click();
+    await page.getByRole('button', { name: /Ver carrito/ }).click();
+    await expect(page.locator('.limits li').nth(0)).toHaveClass(/ok/);
+  });
+});

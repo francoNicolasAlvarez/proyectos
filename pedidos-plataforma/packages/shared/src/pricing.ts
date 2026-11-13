@@ -3,6 +3,8 @@
  * Importes en centavos enteros.
  */
 
+import { DEFAULT_ORDER_LIMITS, OrderLimitError, orderLimitViolations, orderUsage, type OrderLimits, type PriorUsage } from './limits';
+
 export interface OptionDef { id: string; name: string; priceDeltaCents: number; available: boolean }
 export interface OptionGroupDef { id: string; name: string; minSelect: number; maxSelect: number; options: readonly OptionDef[] }
 export interface ProductDef {
@@ -35,54 +37,6 @@ export class PricingError extends Error {
   }
 }
 
-/* ---------- Límites por pedido ---------- */
-
-/**
- * Límite de gasto y de cantidad por pedido. Valores por defecto: $100.000 y 20 productos individuales u 8 combos.
- * "20 individuales u 8 combos" se aplica como equivalencia: un combo vale (maxIndividualItems / maxCombos) productos
- * individuales (2,5 con los valores por defecto), así que se pueden mezclar sin superar el tope.
- */
-export interface OrderLimits { maxTotalCents: number; maxIndividualItems: number; maxCombos: number }
-export const DEFAULT_ORDER_LIMITS: OrderLimits = { maxTotalCents: 10_000_000, maxIndividualItems: 20, maxCombos: 8 };
-
-export type OrderLimitCode = 'ORDER_TOTAL_LIMIT_EXCEEDED' | 'ORDER_ITEM_LIMIT_EXCEEDED';
-export interface LimitViolation {
-  code: OrderLimitCode;
-  /** Tope: centavos (gasto) o productos individuales equivalentes (cantidad). */
-  limit: number;
-  /** Valor del pedido en la misma unidad que el tope. */
-  actual: number;
-}
-export interface OrderUsage { individualItems: number; combos: number; equivalentItems: number; totalCents: number }
-
-export class OrderLimitError extends Error {
-  readonly code: OrderLimitCode;
-  constructor(readonly violations: readonly LimitViolation[], readonly usage: OrderUsage) {
-    super(violations.map((v) => v.code).join(', '));
-    this.name = 'OrderLimitError';
-    this.code = (violations[0] as LimitViolation).code;
-  }
-}
-
-export function orderUsage(lines: readonly { kind?: 'simple' | 'combo'; quantity: number; lineTotalCents: number }[], limits: OrderLimits = DEFAULT_ORDER_LIMITS): OrderUsage {
-  let individualItems = 0; let combos = 0; let totalCents = 0;
-  for (const l of lines) { if (l.kind === 'combo') combos += l.quantity; else individualItems += l.quantity; totalCents += l.lineTotalCents; }
-  return { individualItems, combos, equivalentItems: individualItems + combos * (limits.maxIndividualItems / limits.maxCombos), totalCents };
-}
-
-/** Todas las reglas que el pedido incumple (lista vacía si cumple). Aritmética entera para el tope de cantidad. */
-export function orderLimitViolations(lines: readonly { kind?: 'simple' | 'combo'; quantity: number; lineTotalCents: number }[], limits: OrderLimits = DEFAULT_ORDER_LIMITS): LimitViolation[] {
-  if (limits.maxCombos < 1 || limits.maxIndividualItems < 1 || limits.maxTotalCents < 1) throw new Error('Límites de pedido inválidos');
-  const u = orderUsage(lines, limits);
-  const out: LimitViolation[] = [];
-  if (u.totalCents > limits.maxTotalCents) out.push({ code: 'ORDER_TOTAL_LIMIT_EXCEEDED', limit: limits.maxTotalCents, actual: u.totalCents });
-  // peso entero: individual = maxCombos, combo = maxIndividualItems; capacidad = maxIndividualItems × maxCombos
-  if (u.individualItems * limits.maxCombos + u.combos * limits.maxIndividualItems > limits.maxIndividualItems * limits.maxCombos) {
-    out.push({ code: 'ORDER_ITEM_LIMIT_EXCEEDED', limit: limits.maxIndividualItems, actual: u.equivalentItems });
-  }
-  return out;
-}
-
 export const MAX_QUANTITY_PER_LINE = 50;
 
 export function priceLine(product: ProductDef | undefined, line: LineInput): PricedLine {
@@ -111,13 +65,14 @@ export function priceLine(product: ProductDef | undefined, line: LineInput): Pri
   return { productId: product.id, quantity: line.quantity, unitPriceCents: unit, lineTotalCents: unit * line.quantity, chosen };
 }
 
-export function priceCart(products: ReadonlyMap<string, ProductDef>, lines: readonly LineInput[], limits: OrderLimits = DEFAULT_ORDER_LIMITS) {
+export function priceCart(products: ReadonlyMap<string, ProductDef>, lines: readonly LineInput[], limits: OrderLimits = DEFAULT_ORDER_LIMITS, prior?: PriorUsage) {
   if (lines.length === 0) throw new PricingError('EMPTY_CART');
   const priced = lines.map((l) => priceLine(products.get(l.productId), l));
   const forLimits = priced.map((l) => ({ kind: products.get(l.productId)?.kind, quantity: l.quantity, lineTotalCents: l.lineTotalCents }));
-  const violations = orderLimitViolations(forLimits, limits);
-  if (violations.length) throw new OrderLimitError(violations, orderUsage(forLimits, limits));
-  return { lines: priced, subtotalCents: priced.reduce((a, l) => a + l.lineTotalCents, 0), usage: orderUsage(forLimits, limits) };
+  // Los límites cuentan este pedido MÁS los pedidos abiertos de la persona en el local.
+  const violations = orderLimitViolations(forLimits, limits, prior);
+  if (violations.length) throw new OrderLimitError(violations, orderUsage(forLimits, limits, prior));
+  return { lines: priced, subtotalCents: priced.reduce((a, l) => a + l.lineTotalCents, 0), usage: orderUsage(forLimits, limits, prior) };
 }
 
 /** Tiempo estimado inicial: el mayor tiempo de preparación de los ítems (los productos se preparan en paralelo). */
