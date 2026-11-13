@@ -167,6 +167,28 @@ CREATE TABLE tenant_payment_accounts (
   UNIQUE (provider, provider_account_id)
 );
 
+-- Directorio sin datos sensibles (sin RLS): permite resolver a qué local pertenece una cuenta del proveedor
+-- cuando llega un webhook, antes de conocer el tenant. Se mantiene solo desde tenant_payment_accounts.
+CREATE TABLE provider_account_directory (
+  provider text NOT NULL,
+  provider_account_id text NOT NULL,
+  tenant_id uuid NOT NULL REFERENCES tenants (id) ON DELETE CASCADE,
+  PRIMARY KEY (provider, provider_account_id)
+);
+CREATE FUNCTION sync_provider_directory() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    DELETE FROM provider_account_directory WHERE provider = OLD.provider AND provider_account_id = OLD.provider_account_id;
+    RETURN OLD;
+  END IF;
+  INSERT INTO provider_account_directory (provider, provider_account_id, tenant_id)
+  VALUES (NEW.provider, NEW.provider_account_id, NEW.tenant_id)
+  ON CONFLICT (provider, provider_account_id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_provider_directory AFTER INSERT OR UPDATE OR DELETE ON tenant_payment_accounts
+  FOR EACH ROW EXECUTE FUNCTION sync_provider_directory();
+
 CREATE TABLE opening_hours (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES tenants (id) ON DELETE CASCADE,
