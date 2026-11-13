@@ -78,6 +78,8 @@ export async function dispatchOutbox(db: Database, rt: Realtime | null, opts: { 
         }
       }
       if (VENUE_EVENTS.has(ev.type)) live.push({ channel: `tenant:${ev.tenant_id}`, message: { type: 'queue_changed', event: ev.type, orderId: orderId ?? null } });
+      // Un reembolso fallido es dinero del cliente sin devolver: el panel debe mostrar una alerta, no solo refrescar la cola.
+      if (ev.type === 'refund.failed') live.push({ channel: `tenant:${ev.tenant_id}`, message: { type: 'refund_failed', refundId: payload?.refundId ?? null } });
     }
     if (batch.length) {
       await tx.query(`UPDATE outbox_events SET published_at = now() WHERE id IN (${batch.map((_, i) => `$${i + 1}`).join(',')})`, batch.map((b) => b.id));

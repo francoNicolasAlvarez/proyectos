@@ -15,6 +15,7 @@ import { listNotifications, markNotificationsRead } from '../notifications';
 import { createOrder, markPartReady, redeemPickup, transitionOrder } from '../order-service';
 import type { InMemoryHub } from '../realtime';
 import { handlePaymentWebhook } from '../payments/payment-service';
+import { listRefunds, retryRefund } from '../payments/refund-admin';
 import type { PaymentProvider } from '../payments/provider';
 import type { SimulatedProvider } from '../payments/simulated';
 import { getCustomerOrder, getPublicMenu, getVenueQueue } from '../read-models';
@@ -48,7 +49,7 @@ const STATUS: Record<string, number> = {
   ORDER_NOT_FOUND: 404, PART_NOT_FOUND: 404, TENANT_NOT_FOUND: 404, TENANT_NOT_ACTIVE: 404, UNKNOWN_ACCOUNT: 404, NO_ACTIVE_MENU: 404,
   EMAIL_TAKEN: 409, ALREADY_USED: 409, IDEMPOTENCY_KEY_REUSED: 409, AMOUNT_MISMATCH: 409,
   PAUSED: 409, CLOSED: 409, CONCURRENT_LIMIT: 409, INTERVAL_LIMIT: 409, PRODUCT_NOT_IN_ACTIVE_MENU: 409,
-  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400,
+  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
   ORDER_NOT_PAYABLE: 409, PAYMENT_WINDOW_EXPIRED: 409, PAYMENT_ACCOUNT_NOT_CONNECTED: 409,
 };
 
@@ -257,6 +258,18 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
     const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'orders.deliver');
     const b = schemas.redeem.parse(req.body);
     return withContext(cfg.db, ctx, (tx) => redeemPickup(tx, { tenantId: tenant.id, staffUserId: user.id, token: b.token, shortCode: b.shortCode }));
+  });
+
+  /* ---------- reembolsos: ver los pendientes y fallidos, y reintentar a mano ---------- */
+  app.get('/venues/:slug/staff/refunds', async (req) => {
+    const { tenant, ctx } = await staff(req, (req.params as { slug: string }).slug, 'refunds.issue');
+    const status = z.enum(['pending', 'succeeded', 'failed']).optional().parse((req.query as { status?: string }).status);
+    return withContext(cfg.db, ctx, (tx) => listRefunds(tx, tenant.id, { status }));
+  });
+  app.post('/venues/:slug/staff/refunds/:id/retry', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'refunds.issue');
+    await withContext(cfg.db, ctx, (tx) => retryRefund(tx, { tenantId: tenant.id, refundId: idParam(req), actorUserId: user.id }));
+    return { retrying: true };
   });
 
   /* ---------- límites por pedido del local ---------- */
