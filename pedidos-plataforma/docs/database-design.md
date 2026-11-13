@@ -1,5 +1,9 @@
 # Diseño de base de datos (Etapa 3)
 
+**Estado:** implementado en `apps/api/db/migrations/0001_init.sql` y verificado con `apps/api/test/database.test.mjs` (31 pruebas contra PostgreSQL real vía PGlite). Dos diferencias respecto del diseño original: `orders.operational_status` incluye `awaiting_payment` como estado inicial (el pedido existe pero no se muestra al local hasta que el pago esté aprobado), y los índices únicos de email y slug usan `lower()` en lugar del tipo `citext`.
+
+**Limitación conocida de las pruebas:** PGlite usa una sola conexión, así que el test de "dos escaneos simultáneos" no ejercita concurrencia real. Debe repetirse contra un PostgreSQL con varias conexiones (servicio en CI) antes del lanzamiento.
+
 PostgreSQL 16. Este documento es el diseño; las migraciones ejecutables (Drizzle, SQL) se generan al comenzar el backend (Etapa 5) y se prueban contra una base real.
 
 ## 1. Convenciones
@@ -86,7 +90,7 @@ Checks: `total_cents >= 0`; coherencia entre `payment_timing` y los estados de p
 
 **payments**: `id`, `tenant_id`, `order_id`, `provider`, `provider_payment_id` (único con `provider`), `status`, `amount_cents`, `currency`, `method_detail`, `raw jsonb`, `approved_at`. Para pagos al retiro: `collected_by`, `collected_at`.
 
-**payment_events**: `id`, `provider`, `provider_event_id` (único con `provider`), `received_at`, `payload jsonb`, `processed_at`, `error`. La restricción única es la deduplicación de webhooks. Puede no tener `tenant_id` al recibirse; se completa al resolver el pedido.
+**payment_events**: `id`, `provider`, `provider_event_id` (único con `provider`), `received_at`, `payload jsonb`, `processed_at`, `error`. La restricción única es la deduplicación de webhooks. `tenant_id` es obligatorio: se resuelve al recibir el webhook a partir de la cuenta de Mercado Pago del vendedor (cada local tiene la suya), por lo que la tabla queda cubierta por RLS.
 
 **refunds**: `id`, `tenant_id`, `payment_id`, `amount_cents`, `reason`, `status` (`pending|succeeded|failed`), `provider_refund_id`, `attempts`, `last_error`, `requested_by`.
 

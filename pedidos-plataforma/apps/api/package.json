@@ -1,0 +1,11 @@
+{
+  "name": "@pasamanos/api",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.2.17"
+  }
+}

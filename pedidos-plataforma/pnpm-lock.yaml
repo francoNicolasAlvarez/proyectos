@@ -8,18 +8,39 @@ importers:
 
   .: {}
 
+  apps/api:
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: 0.2.17
+        version: 0.2.17
+
   apps/e2e:
     devDependencies:
+      '@axe-core/playwright':
+        specifier: 4.10.1
+        version: 4.10.1(playwright-core@1.49.1)
       '@playwright/test':
         specifier: 1.49.1
         version: 1.49.1
 
 packages:
 
+  '@axe-core/playwright@4.10.1':
+    resolution: {integrity: sha512-EV5t39VV68kuAfMKqb/RL+YjYKhfuGim9rgIaQ6Vntb2HgaCaau0h98Y3WEUqW1+PbdzxDtDNjFAipbtZuBmEA==}
+    peerDependencies:
+      playwright-core: '>= 1.0.0'
+
+  '@electric-sql/pglite@0.2.17':
+    resolution: {integrity: sha512-qEpKRT2oUaWDH6tjRxLHjdzMqRUGYDnGZlKrnL4dJ77JVMcP2Hpo3NYnOSPKdZdeec57B6QPprCUFg0picx5Pw==}
+
   '@playwright/test@1.49.1':
     resolution: {integrity: sha512-Ky+BVzPz8pL6PQxHqNRW1k3mIyv933LML7HktS8uik0bUXNCdPhoS/kLihiO1tMf/egaJb4IutXd7UywvXEW+g==}
     engines: {node: '>=18'}
     hasBin: true
+
+  axe-core@4.10.3:
+    resolution: {integrity: sha512-Xm7bpRXnDSX2YE2YFfBk2FnF0ep6tmG7xPh8iHee8MIcrgq762Nkce856dYtJYLkuIoYZvGfTs/PbZhideTcEg==}
+    engines: {node: '>=4'}
 
   fsevents@2.3.2:
     resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
@@ -38,9 +59,18 @@ packages:
 
 snapshots:
 
+  '@axe-core/playwright@4.10.1(playwright-core@1.49.1)':
+    dependencies:
+      axe-core: 4.10.3
+      playwright-core: 1.49.1
+
+  '@electric-sql/pglite@0.2.17': {}
+
   '@playwright/test@1.49.1':
     dependencies:
       playwright: 1.49.1
+
+  axe-core@4.10.3: {}
 
   fsevents@2.3.2:
     optional: true

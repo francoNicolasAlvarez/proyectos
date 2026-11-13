@@ -30,7 +30,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 :focus-visible { outline: 3px solid var(--brand-2); outline-offset: 2px; }
 
 .demo-bar {
-  position: sticky; top: 0; z-index: 50;
   display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   padding: 8px 12px; background: #1b1f3b; color: #fff; font-size: 13px;
 }
@@ -69,7 +68,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .tabs {
-  position: sticky; top: 48px; z-index: 10; background: var(--bg);
+  position: sticky; top: 0; z-index: 10; background: var(--bg);
   display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px; border-bottom: 1px solid var(--border);
   scrollbar-width: none;
 }
@@ -129,7 +128,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .pad { padding: 16px; }
 .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 16px 0 8px; }
 
-.line { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.line { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .line .info { flex: 1; min-width: 0; }
 .line .info small { display: block; color: var(--muted); }
 .qty { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 999px; }
