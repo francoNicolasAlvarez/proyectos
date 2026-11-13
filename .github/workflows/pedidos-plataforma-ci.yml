@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["pedidos-plataforma/**"]
+  pull_request:
+    paths: ["pedidos-plataforma/**"]
+
+defaults:
+  run:
+    working-directory: pedidos-plataforma
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pedidos-plataforma/pnpm-lock.yaml
+      # Sin lockfile todavía: se pasa a --frozen-lockfile cuando exista.
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
