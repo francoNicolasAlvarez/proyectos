@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { allSql } from '../db/schema.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
@@ -17,6 +18,7 @@ let app: FastifyInstance;
 
 class FakeProvider implements PaymentProvider {
   readonly name = 'mercadopago';
+  async createCheckout() { return { checkoutUrl: 'https://pago.fake/checkout', providerReference: null }; }
   payments = new Map<string, ProviderPayment>();
   verifyWebhookSignature(req: WebhookRequest) { return req.headers['x-signature'] === 'ok'; }
   parseWebhook(req: WebhookRequest) { const b = JSON.parse(req.rawBody); return { eventId: String(b.id), type: 'payment' as const, resourceId: String(b.data.id), accountId: String(b.user_id) }; }
@@ -27,10 +29,10 @@ const provider = new FakeProvider();
 
 beforeAll(async () => {
   pg = new PGlite();
-  await pg.exec(readFileSync(fileURLToPath(new URL('../db/migrations/0001_init.sql', import.meta.url)), 'utf8'));
+  await pg.exec(allSql());
   app = await buildApp({
     db: pg as unknown as Database, pickupSecret: 'pick', webhookSecret: 'wh', encryptionKey: KEY, provider,
-    allowedOrigins: [ORIGIN], secureCookies: false, dbRole: 'app_runtime', scryptCost: 2 ** 10,
+    allowedOrigins: [ORIGIN], publicApiUrl: 'http://localhost:3000', appBaseUrl: 'http://localhost:5173', secureCookies: false, dbRole: 'app_runtime', scryptCost: 2 ** 10,
   });
 });
 afterAll(async () => { await app.close(); });

@@ -6,6 +6,7 @@ import pg from 'pg';   // pg es CommonJS: Node no permite importar { Pool } con 
 import { z } from 'zod';
 import { buildApp } from './http/app';
 import { MercadoPagoProvider } from './payments/mercadopago';
+import { SimulatedProvider } from './payments/simulated';
 import { dispatchOutbox } from './notifications';
 import { expireUnpaidOrders, processPendingRefunds } from './payments/payment-service';
 import { pgDatabase } from './pg-database';
@@ -20,13 +21,22 @@ const env = z.object({
   TOKEN_ENCRYPTION_KEY: z.string().refine((v) => Buffer.from(v, 'base64').length === 32, 'debe ser 32 bytes en base64'),
   ALLOWED_ORIGINS: z.string().min(1).transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
   PORT: z.coerce.number().int().default(3000),
+  /** 'simulated' solo para desarrollo (pago falso, sin Mercado Pago). En producción debe ser 'mercadopago'. */
+  PAYMENTS_MODE: z.enum(['simulated', 'mercadopago']).default('simulated'),
+  PUBLIC_API_URL: z.string().url().optional(),
+  APP_BASE_URL: z.string().url().optional(),
   NODE_ENV: z.string().default('development'),
 }).parse(process.env);
+
+if (env.NODE_ENV === 'production' && env.PAYMENTS_MODE === 'simulated') throw new Error('PAYMENTS_MODE=simulated no se permite en producción');
+const publicApiUrl = env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`;
+const appBaseUrl = env.APP_BASE_URL ?? env.ALLOWED_ORIGINS[0] ?? 'http://localhost:5173';
+const simulated = env.PAYMENTS_MODE === 'simulated' ? new SimulatedProvider(publicApiUrl) : undefined;
 
 const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 20 });
 const db = pgDatabase(pool);
 const hub = new InMemoryHub();
-const provider = new MercadoPagoProvider();
+const provider = simulated ?? new MercadoPagoProvider();
 const encryptionKey = Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'base64');
 const app = await buildApp({
   db,
@@ -35,7 +45,11 @@ const app = await buildApp({
   webhookSecret: env.MP_WEBHOOK_SECRET,
   encryptionKey,
   provider,
-  allowedOrigins: env.ALLOWED_ORIGINS,
+  publicApiUrl,
+  appBaseUrl,
+  simulated,
+  // la página de pago simulada se sirve desde la propia API: su origen debe poder enviar peticiones con cookie
+  allowedOrigins: simulated ? [...env.ALLOWED_ORIGINS, new URL(publicApiUrl).origin] : env.ALLOWED_ORIGINS,
   secureCookies: env.NODE_ENV === 'production',
 });
 

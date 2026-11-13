@@ -1,10 +1,11 @@
 import { test, before, describe } from 'node:test';
+import { allSql } from '../db/schema.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 
-const migration = readFileSync(fileURLToPath(new URL('../db/migrations/0001_init.sql', import.meta.url)), 'utf8');
+const migration = allSql();
 
 let db;
 const ids = {};

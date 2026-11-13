@@ -4,6 +4,7 @@
  * apuntando a una base vacía (por ejemplo, un servicio de PostgreSQL en CI).
  */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { allSql } from '../db/schema.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,7 +38,7 @@ describe.skipIf(!enabled)('PostgreSQL real, varias conexiones', () => {
     if (!/_test$/.test(dbName)) throw new Error(`TEST_DATABASE_URL apunta a "${dbName}": por seguridad el nombre de la base debe terminar en _test`);
     pool = new Pool({ connectionString: url, max: 12 });
     await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    await pool.query(readFileSync(fileURLToPath(new URL('../db/migrations/0001_init.sql', import.meta.url)), 'utf8'));
+    await pool.query(allSql());
     db = pgDatabase(pool);
   }, 120_000);
   afterAll(async () => { await pool?.end(); await stop?.(); });

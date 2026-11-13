@@ -22,8 +22,24 @@ export interface WebhookEvent {
 
 export interface WebhookRequest { rawBody: string; headers: Record<string, string | undefined>; query?: Record<string, string | undefined> }
 
+/** Datos para crear el cobro de un pedido en el proveedor. */
+export interface CheckoutInput {
+  orderId: string;
+  orderNumber: number;
+  items: { title: string; quantity: number; unitPriceCents: number }[];
+  totalCents: number;
+  currency: string;
+  /** El cobro deja de ser válido pasado este instante (la ventana de pago del local). */
+  expiresAt: Date;
+  /** Dirección pública a la que el proveedor avisa los pagos. */
+  notificationUrl: string;
+  backUrls: { success: string; failure: string; pending: string };
+}
+
 export interface PaymentProvider {
   readonly name: string;
+  /** Crea el cobro y devuelve la dirección a la que hay que enviar al cliente para que pague. */
+  createCheckout(accessToken: string, input: CheckoutInput): Promise<{ checkoutUrl: string; providerReference: string | null }>;
   verifyWebhookSignature(req: WebhookRequest, secret: string): boolean;
   parseWebhook(req: WebhookRequest): WebhookEvent | null;
   /** Se consulta SIEMPRE al proveedor: nunca se confía en el contenido del webhook. */

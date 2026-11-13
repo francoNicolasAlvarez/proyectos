@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { allSql } from '../db/schema.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
@@ -14,11 +15,11 @@ let pg: PGlite; let db: Database; let app: FastifyInstance;
 
 beforeAll(async () => {
   pg = new PGlite();
-  await pg.exec(readFileSync(fileURLToPath(new URL('../db/migrations/0001_init.sql', import.meta.url)), 'utf8'));
+  await pg.exec(allSql());
   db = pg as unknown as Database;
   app = await buildApp({
     db, pickupSecret: 'p', webhookSecret: 'w', encryptionKey: randomBytes(32), provider: { name: 'mercadopago' } as never,
-    allowedOrigins: [ORIGIN], secureCookies: false, dbRole: 'app_runtime', scryptCost: 2 ** 10,
+    allowedOrigins: [ORIGIN], publicApiUrl: 'http://localhost:3000', appBaseUrl: 'http://localhost:5173', secureCookies: false, dbRole: 'app_runtime', scryptCost: 2 ** 10,
   });
 });
 afterAll(async () => { await app.close(); });

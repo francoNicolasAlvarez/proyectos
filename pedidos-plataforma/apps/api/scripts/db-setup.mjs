@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { applyPending } from '../db/schema.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -52,12 +53,7 @@ await ensureDatabase(admin, `${dbName}_test`);
 // 2. migración
 const mig = client(adminUser, adminPassword, dbName);
 await mig.connect();
-const applied = (await mig.query("SELECT to_regclass('public.orders') AS t")).rows[0].t;
-if (applied) log('migración: ya estaba aplicada');
-else {
-  await mig.query(readFileSync(join(root, 'apps', 'api', 'db', 'migrations', '0001_init.sql'), 'utf8'));
-  log('migración 0001_init: aplicada');
-}
+await applyPending(mig, log);
 
 // 3. contraseñas y rol de la aplicación (la migración lo crea sin permiso de login)
 await admin.query(`ALTER ROLE ${admin.escapeIdentifier(adminUser)} WITH PASSWORD ${admin.escapeLiteral(adminPassword)}`);

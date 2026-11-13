@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { allSql } from '../db/schema.mjs';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -13,7 +14,7 @@ type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-exp
 
 beforeAll(async () => {
   pg = new PGlite();
-  await pg.exec(readFileSync(fileURLToPath(new URL('../db/migrations/0001_init.sql', import.meta.url)), 'utf8'));
+  await pg.exec(allSql());
   db = pg as unknown as Database;
 });
 const run = <T>(fn: Parameters<typeof withContext<T>>[2], ctx = { role: 'app_runtime' } as Parameters<typeof withContext>[1]) => withContext(db, ctx, fn);

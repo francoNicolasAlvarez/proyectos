@@ -1,4 +1,5 @@
 import { createHmac, randomBytes } from 'node:crypto';
+import { allSql } from '../db/schema.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
@@ -18,7 +19,7 @@ const ROLE = 'app_runtime';
 
 beforeAll(async () => {
   pg = new PGlite();
-  await pg.exec(readFileSync(fileURLToPath(new URL('../db/migrations/0001_init.sql', import.meta.url)), 'utf8'));
+  await pg.exec(allSql());
   db = pg as unknown as Database;
 });
 const one = async (sql: string, params: unknown[] = []) => (await pg.query<Row>(sql, params)).rows[0] as Row;
@@ -27,6 +28,7 @@ const code = async (p: Promise<unknown>) => { try { await p; } catch (e) { retur
 /* ---------- proveedor simulado ---------- */
 class FakeProvider implements PaymentProvider {
   readonly name = 'mercadopago';
+  async createCheckout() { return { checkoutUrl: 'https://pago.fake/checkout', providerReference: null }; }
   payments = new Map<string, ProviderPayment>();
   refundCalls: { paymentId: string; amountCents: number; key: string }[] = [];
   failGetPayment = false;

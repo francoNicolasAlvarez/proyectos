@@ -8,6 +8,7 @@ import { z, ZodError } from 'zod';
 import { CANCELLATION_REASONS, InvalidTransitionError, OrderLimitError, PricingError, can, type Action } from '@pasamanos/shared';
 import { SESSION_DAYS, authenticate, login, logout, registerUser, roleIn, type AuthUser } from '../auth';
 import { DomainError, withContext, type Database } from '../db';
+import { buildCheckout } from '../checkout-service';
 import { confirmLimitsReviewed, getLimitsReport, updateLimits } from '../limits-service';
 import { resolveTenantBySlug } from '../menu';
 import { listNotifications, markNotificationsRead } from '../notifications';
@@ -15,6 +16,7 @@ import { createOrder, markPartReady, redeemPickup, transitionOrder } from '../or
 import type { InMemoryHub } from '../realtime';
 import { handlePaymentWebhook } from '../payments/payment-service';
 import type { PaymentProvider } from '../payments/provider';
+import type { SimulatedProvider } from '../payments/simulated';
 import { getCustomerOrder, getPublicMenu, getVenueQueue } from '../read-models';
 
 export interface AppConfig {
@@ -23,6 +25,11 @@ export interface AppConfig {
   webhookSecret: string;
   encryptionKey: Buffer;
   provider: PaymentProvider;
+  /** Dirección pública de esta API (para los avisos del proveedor) y de la app web (a donde vuelve el cliente tras pagar). */
+  publicApiUrl: string;
+  appBaseUrl: string;
+  /** Solo desarrollo: habilita la página de pago simulada. Nunca en producción. */
+  simulated?: SimulatedProvider;
   /** Difusión en tiempo real (SSE). Si no se indica, los endpoints de eventos no se registran. */
   hub?: InMemoryHub;
   /** Orígenes permitidos para peticiones con cookie (protección CSRF). */
@@ -40,6 +47,7 @@ const STATUS: Record<string, number> = {
   EMAIL_TAKEN: 409, ALREADY_USED: 409, IDEMPOTENCY_KEY_REUSED: 409, AMOUNT_MISMATCH: 409,
   PAUSED: 409, CLOSED: 409, CONCURRENT_LIMIT: 409, INTERVAL_LIMIT: 409, PRODUCT_NOT_IN_ACTIVE_MENU: 409,
   RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400,
+  ORDER_NOT_PAYABLE: 409, PAYMENT_WINDOW_EXPIRED: 409, PAYMENT_ACCOUNT_NOT_CONNECTED: 409,
 };
 
 const reasonCodes = Object.keys(CANCELLATION_REASONS) as [keyof typeof CANCELLATION_REASONS, ...(keyof typeof CANCELLATION_REASONS)[]];
@@ -179,6 +187,21 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
     return view;
   });
 
+  /** Inicia el cobro: devuelve la dirección del proveedor (o de la página simulada) a la que se envía al cliente. */
+  app.post('/orders/:id/checkout', async (req) => {
+    const user = await currentUser(req); const id = idParam(req);
+    const tenantId = await ownOrderTenant(user.id, id);
+    const { input, accessToken } = await withContext(cfg.db, { tenantId, userId: user.id, role }, (tx) => buildCheckout(tx, {
+      tenantId, userId: user.id, orderId: id, provider: cfg.provider.name, encryptionKey: cfg.encryptionKey,
+      urls: {
+        notificationUrl: `${cfg.publicApiUrl}/webhooks/mercadopago`,
+        backUrls: { success: `${cfg.appBaseUrl}/orders/${id}?pago=ok`, failure: `${cfg.appBaseUrl}/orders/${id}?pago=error`, pending: `${cfg.appBaseUrl}/orders/${id}?pago=pendiente` },
+      },
+    }));
+    const out = await cfg.provider.createCheckout(accessToken, input);   // llamada de red: fuera de la transacción
+    return { checkoutUrl: out.checkoutUrl, expiresAt: input.expiresAt.toISOString() };
+  });
+
   app.post('/orders/:id/cancel', async (req) => {
     const user = await currentUser(req); const id = idParam(req);
     const tenantId = await ownOrderTenant(user.id, id);
@@ -255,6 +278,42 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
       { rawBody: raw, headers, query: req.query as Record<string, string | undefined> });
     return reply.code(200).send(r);   // 200 evita reintentos del proveedor; los errores reales devuelven 4xx/5xx
   });
+
+  /* ---------- SOLO DESARROLLO: página de pago simulada ---------- */
+  if (cfg.simulated) {
+    const sim = cfg.simulated;
+    app.get('/dev/pay/:orderId', async (req, reply) => {
+      const id = uuid.parse((req.params as { orderId: string }).orderId);
+      const info = sim.checkoutFor(id);
+      if (!info) throw new DomainError('ORDER_NOT_FOUND');
+      const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: info.currency }).format(info.totalCents / 100);
+      const rows = info.items.map((i) => `<li>${i.quantity} × ${i.title.replace(/[<>&"]/g, '')}</li>`).join('');
+      return reply.type('text/html; charset=utf-8').send(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pago simulado</title>
+<body style="font-family:system-ui;max-width:420px;margin:40px auto;padding:0 16px;color:#1b1f3b">
+<p style="background:#fff4dd;color:#7a4b00;padding:8px 12px;border-radius:8px">⚠ Pago SIMULADO (solo desarrollo). No se cobra nada.</p>
+<h1>Pedido #${String(info.orderNumber).padStart(3, '0')}</h1><ul>${rows}</ul><h2>Total: ${money}</h2>
+<button id="ok" style="width:100%;padding:14px;font-size:16px;border:0;border-radius:12px;background:#3451d1;color:#fff;margin-bottom:8px">Aprobar pago</button>
+<button id="no" style="width:100%;padding:14px;font-size:16px;border:0;border-radius:12px;background:#fdecea;color:#b3261e">Rechazar pago</button>
+<p id="msg" role="status"></p>
+<script>for (const [btn, outcome] of [['ok','approve'],['no','reject']]) document.getElementById(btn).onclick = async () => {
+  const r = await fetch('/dev/pay/${id}/' + outcome, { method: 'POST' }); const j = await r.json();
+  document.getElementById('msg').textContent = r.ok ? 'Listo. Volviendo…' : 'Error: ' + j.code;
+  if (r.ok) setTimeout(() => { location.href = j.returnUrl; }, 600); };</script></body></html>`);
+    });
+    app.post('/dev/pay/:orderId/:outcome', async (req) => {
+      const { orderId, outcome } = req.params as { orderId: string; outcome: string };
+      const id = uuid.parse(orderId);
+      if (outcome !== 'approve' && outcome !== 'reject') throw new DomainError('INVALID_OUTCOME');
+      const info = sim.checkoutFor(id);
+      if (!info) throw new DomainError('ORDER_NOT_FOUND');
+      const acc = (await withContext(cfg.db, { admin: true, role }, (tx) => tx.query<{ provider_account_id: string }>(
+        "SELECT a.provider_account_id FROM tenant_payment_accounts a JOIN orders o ON o.tenant_id = a.tenant_id WHERE o.id = $1 AND a.provider = 'simulated'", [id]))).rows[0];
+      if (!acc) throw new DomainError('PAYMENT_ACCOUNT_NOT_CONNECTED');
+      const wh = sim.announce({ orderId: id, amountCents: info.totalCents, status: outcome === 'approve' ? 'approved' : 'rejected', accountId: acc.provider_account_id, secret: cfg.webhookSecret });
+      const result = await handlePaymentWebhook({ db: cfg.db, provider: cfg.provider, webhookSecret: cfg.webhookSecret, encryptionKey: cfg.encryptionKey, role }, { rawBody: wh.rawBody, headers: wh.headers });
+      return { outcome: result.outcome, returnUrl: `${cfg.appBaseUrl}/orders/${id}?pago=${outcome === 'approve' ? 'ok' : 'error'}` };
+    });
+  }
 
   /* ---------- tiempo real (SSE) ---------- */
   // El estado de verdad siempre se pide por GET; SSE solo avisa que algo cambió (al reconectar, el cliente re-consulta).

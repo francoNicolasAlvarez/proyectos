@@ -35,6 +35,16 @@ pnpm typecheck
 pnpm test
 ```
 
+## Pagos
+
+Con `PAYMENTS_MODE=simulated` (por defecto en desarrollo) el cobro usa un proveedor falso: al pagar, el cliente llega a una página de
+desarrollo con "Aprobar pago" y "Rechazar pago", y el pago pasa por el **mismo** procesamiento de webhook que uno real. Sirve para
+recorrer todo el flujo sin Mercado Pago. El servidor se niega a arrancar así con `NODE_ENV=production`.
+
+Para probar con Mercado Pago real: poner `MP_TEST_ACCESS_TOKEN` en `.env`, ejecutar `pnpm run db:connect-mp` y arrancar con
+`PAYMENTS_MODE=mercadopago` y `PUBLIC_API_URL` apuntando a una dirección pública (un túnel), configurada también como URL de
+notificaciones en la aplicación de Mercado Pago. Ese camino todavía no se verificó contra la API real.
+
 ## Ver los prototipos
 
 Abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototype/venue-panel/index.html` en dos pestañas del mismo navegador: comparten los pedidos.
@@ -50,8 +60,8 @@ cp .env.example .env                      # completar DATABASE_URL, MIGRATION_DA
 powershell -File infra/local-postgres.ps1 setup   # una sola vez: copia binarios e inicializa
 powershell -File infra/local-postgres.ps1 start   # cada vez que se reinicie la PC
 cd apps/api
-pnpm run db:setup                         # crea bases, aplica la migración, fija contraseñas y las exige
-pnpm run db:seed                          # local de demostración "el-faro" y una cuenta por rol
+pnpm run db:setup                         # crea bases, aplica las migraciones pendientes, fija contraseñas y las exige
+pnpm run db:seed                          # local de demostración "el-faro", una cuenta por rol y su cuenta de cobro simulada
 pnpm run start                            # API en http://localhost:3000
 ```
 

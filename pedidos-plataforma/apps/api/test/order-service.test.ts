@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { allSql } from '../db/schema.mjs';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -16,7 +17,7 @@ let db: Database;
 
 beforeAll(async () => {
   pg = new PGlite();
-  await pg.exec(readFileSync(fileURLToPath(new URL('../db/migrations/0001_init.sql', import.meta.url)), 'utf8'));
+  await pg.exec(allSql());
   db = pg as unknown as Database;
 });
 

@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { registerUser } from '../src/auth';
+import { encryptSecret } from '../src/crypto-box';
 import { pgDatabase } from '../src/pg-database';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -32,9 +33,18 @@ export const DEMO_ACCOUNTS = [
 const pool = new pg.Pool({ connectionString: url, max: 2 });
 const q = async <T extends Record<string, any>>(sql: string, p: unknown[] = []) => (await pool.query(sql, p)).rows as T[]; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+/** Cuenta de cobro SIMULADA del local (solo desarrollo): permite pagar sin Mercado Pago. Repetible. */
+const ensureSimulatedAccount = async (tenantId: string) => {
+  if (!env.TOKEN_ENCRYPTION_KEY) throw new Error('Falta TOKEN_ENCRYPTION_KEY en .env');
+  const r = await q("INSERT INTO tenant_payment_accounts (tenant_id, provider, provider_account_id, access_token_enc) VALUES ($1,'simulated','SIM-EL-FARO',$2) ON CONFLICT DO NOTHING RETURNING id",
+    [tenantId, encryptSecret('simulated', Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'base64'))]);
+  if (r.length) console.log('· Cuenta de cobro simulada conectada al local.');
+};
+
 const exists = await q("SELECT id FROM tenants WHERE lower(slug) = 'el-faro'");
 if (exists.length) {
-  console.log('· El local de demostración ya existe: no se cambió nada.');
+  await ensureSimulatedAccount(exists[0]!.id as string);
+  console.log('· El local de demostración ya existe: no se cambió nada más.');
   await pool.end();
   process.exit(0);
 }
@@ -42,6 +52,7 @@ if (exists.length) {
 const tenant = (await q<{ id: string }>("INSERT INTO tenants (name, slug, description, address) VALUES ('Cervecería El Faro','el-faro','Cervecería artesanal de demostración','Av. Siempreviva 742') RETURNING id"))[0]!.id;
 await q('INSERT INTO tenant_settings (tenant_id, pickup_mode) VALUES ($1, $2)', [tenant, 'per_item']);
 await q("INSERT INTO tenant_payment_methods (tenant_id, method, enabled) VALUES ($1,'payment_app',true),($1,'card_online',true),($1,'cash_on_pickup',false),($1,'card_on_pickup',false)", [tenant]);
+await ensureSimulatedAccount(tenant);
 const barra = (await q<{ id: string }>("INSERT INTO pickup_points (tenant_id, name, description, is_default, sort_order) VALUES ($1,'Barra 1','Bebidas',true,1) RETURNING id", [tenant]))[0]!.id;
 const comida = (await q<{ id: string }>("INSERT INTO pickup_points (tenant_id, name, description, sort_order) VALUES ($1,'Punto de comida','Comidas y combos',2) RETURNING id", [tenant]))[0]!.id;
 for (const [name, kind] of [['Mesa 5', 'table'], ['Barra principal', 'bar'], ['Sector VIP', 'sector'], ['Patio exterior', 'sector']] as const) {

@@ -5,7 +5,7 @@
  * campos de la respuesta y reembolsos) y revisar las condiciones vigentes del esquema marketplace.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { PaymentProvider, ProviderPayment, ProviderPaymentStatus, WebhookEvent, WebhookRequest } from './provider';
+import type { CheckoutInput, PaymentProvider, ProviderPayment, ProviderPaymentStatus, WebhookEvent, WebhookRequest } from './provider';
 
 const API = 'https://api.mercadopago.com';
 
@@ -62,6 +62,33 @@ export class MercadoPagoProvider implements PaymentProvider {
       // El id del evento combina notificación y acción: el mismo pago puede notificarse varias veces con acciones distintas.
       return { eventId: String(b.id ?? `${b.data.id}:${b.action ?? ''}`), type, resourceId: String(b.data.id), accountId: String(b.user_id) };
     } catch { return null; }
+  }
+
+  /**
+   * Crea una preferencia de Checkout Pro. El pedido viaja en external_reference: así el webhook lo vincula.
+   * SIN VERIFICAR contra el sandbox real: formato de la fecha de vencimiento y campos aceptados a confirmar.
+   */
+  async createCheckout(accessToken: string, i: CheckoutInput) {
+    const body = {
+      items: i.items.map((it) => ({ title: it.title.slice(0, 250), quantity: it.quantity, unit_price: it.unitPriceCents / 100, currency_id: i.currency })),
+      external_reference: i.orderId,
+      notification_url: i.notificationUrl,
+      back_urls: i.backUrls,
+      auto_return: 'approved',
+      statement_descriptor: 'PASAMANOS',
+      expires: true,
+      expiration_date_to: i.expiresAt.toISOString().replace('Z', '+00:00'),
+    };
+    const r = await this.f(`${API}/checkout/preferences`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`mercadopago createCheckout ${r.status}`);
+    const p = await r.json() as Record<string, unknown>;
+    const url = p.init_point;
+    if (typeof url !== 'string') throw new Error('mercadopago createCheckout: la respuesta no trae init_point');
+    return { checkoutUrl: url, providerReference: p.id != null ? String(p.id) : null };
   }
 
   async getPayment(accessToken: string, paymentId: string): Promise<ProviderPayment> {
