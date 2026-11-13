@@ -24,8 +24,8 @@ jobs:
           node-version: 20
           cache: pnpm
           cache-dependency-path: pedidos-plataforma/pnpm-lock.yaml
-      # Sin lockfile todavía: se pasa a --frozen-lockfile cuando exista.
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @pasamanos/e2e exec playwright install --with-deps chromium
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test

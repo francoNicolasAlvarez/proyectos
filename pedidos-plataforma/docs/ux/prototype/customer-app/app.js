@@ -71,7 +71,8 @@ function selText(p, sel) {
 }
 const cartCount = () => state.cart.reduce((a, l) => a + l.qty, 0);
 const cartTotal = () => state.cart.reduce((a, l) => a + l.qty * unitPrice(prod(l.pid), l.sel), 0);
-const lineKey = (pid, sel) => pid + '|' + JSON.stringify(Object.keys(sel).sort().map((k) => [k, [...sel[k]].sort()]));
+// Clave segura para usar dentro de atributos HTML (solo letras, números y separadores simples).
+const lineKey = (pid, sel) => [pid, ...Object.keys(sel).sort().map((k) => `${k}-${[...sel[k]].sort().join('_')}`)].join('~');
 const pointsInCart = () => [...new Set(state.cart.map((l) => prod(l.pid).point))];
 
 function toast(msg) {
