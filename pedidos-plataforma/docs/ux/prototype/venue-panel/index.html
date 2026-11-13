@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pasamanos · Prototipo panel del local</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="../../../../packages/ui/assets/logo-mark.svg" alt="Pasamanos" width="36" height="36">
+      <div><strong>Cervecería El Faro</strong><small id="summary" aria-live="polite"></small></div>
+    </div>
+    <div class="actions">
+      <button class="btn-s" data-a="scan">Escanear entrega</button>
+      <button class="btn-s" data-a="avail">Disponibilidad</button>
+      <button class="btn-s" id="pause-btn" data-a="pause" aria-pressed="false">Pausar pedidos</button>
+    </div>
+  </header>
+  <div class="demo-bar" role="region" aria-label="Controles de demostración">
+    <strong>Prototipo</strong>
+    <button data-a="demo-order">Simular pedido entrante</button>
+    <button data-a="demo-reset">Reiniciar</button>
+    <span>Abrí también el prototipo del cliente en otra pestaña: comparten los pedidos.</span>
+  </div>
+  <div id="paused-banner" class="paused" hidden role="status">Los pedidos están pausados: los clientes no pueden pagar.</div>
+  <main class="board" id="board"></main>
+  <div id="modal"></div>
+  <script src="../shared/store.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

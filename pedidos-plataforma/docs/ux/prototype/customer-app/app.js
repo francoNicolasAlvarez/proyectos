@@ -47,8 +47,7 @@ const PRODUCTS = [
     price: 12900, prep: 12, point: 'comida', available: true, groups: [BEERS('beer1', 'Cerveza 1'), BEERS('beer2', 'Cerveza 2')] },
 ];
 
-const state = { view: 'menu', cat: 'beer', cart: [], origin: 'Mesa 5', sheet: null, order: null, pay: 'mp', theme: 0 };
-let orderCounter = 41;
+const state = { view: 'menu', cat: 'beer', cart: [], origin: 'Mesa 5', sheet: null, order: null, pay: 'mp', theme: 0, paused: false };
 let flowToken = 0;
 let toastTimer = null;
 
@@ -122,6 +121,7 @@ function viewMenu() {
       <small>Solo para ubicarte. El pedido se retira en la barra.</small></div>
     <button class="link-btn" data-a="origin-open">Cambiar</button>
   </div>
+  ${state.paused ? '<div class="notice error" style="margin:0 16px 8px">El local pausó los pedidos por el momento. Podés ver el menú, pero no pagar.</div>' : ''}
   ${banner}
   <nav class="tabs" aria-label="Categorías">
     ${CATS.map((c) => `<button class="tab" aria-pressed="${c.id === state.cat}" data-a="cat" data-v="${c.id}">${c.name}</button>`).join('')}
@@ -170,7 +170,7 @@ function viewCart() {
         <div class="grand"><span>Total</span><span>${fmt(cartTotal())}</span></div>
       </div>
       <p></p>
-      <button class="btn" data-a="go-pay">Continuar al pago</button>`
+      <button class="btn" data-a="go-pay" ${state.paused ? 'disabled' : ''}>${state.paused ? 'Pedidos pausados' : 'Continuar al pago'}</button>`
       : `<div class="center" style="padding:48px 0"><p>Tu carrito está vacío.</p><button class="btn secondary" data-a="go-menu">Ver el menú</button></div>`}
   </div>`;
 }
@@ -186,7 +186,7 @@ function viewPay() {
     </div>
     <div class="totals"><div class="grand"><span>Total a pagar</span><span>${fmt(cartTotal())}</span></div></div>
     <p class="muted">Si el local no puede preparar tu pedido, te reembolsamos el importe.</p>
-    <button class="btn" data-a="pay-go">Pagar ${fmt(cartTotal())}</button>
+    <button class="btn" data-a="pay-go" ${state.paused ? 'disabled' : ''}>Pagar ${fmt(cartTotal())}</button>
   </div>`;
 }
 
@@ -203,7 +203,7 @@ function viewTracking() {
   let hero;
   if (o.rejected) {
     hero = `<div class="status-hero"><div style="font-size:48px">😕</div><h2>No pudimos preparar tu pedido</h2><p>${o.number}</p></div>
-      <div class="pad"><div class="notice error">El local rechazó el pedido: <strong>Producto sin disponibilidad</strong>.</div>
+      <div class="pad"><div class="notice error">El local rechazó el pedido: <strong>${o.rejectReason || 'Producto sin disponibilidad'}</strong>.</div>
       <div class="notice ok" style="margin-top:8px">Iniciamos el reembolso de ${fmt(o.total)}. Te avisamos cuando se acredite.</div>
       <p></p><button class="btn" data-a="new-order">Volver al menú</button></div>`;
     return `<div class="topbar"><button class="back" data-a="go-menu" aria-label="Volver al menú">←</button><h2>Seguimiento</h2></div>${hero}`;
@@ -212,7 +212,7 @@ function viewTracking() {
   const emoji = ['✅', '⏳', '👍', '👨‍🍳', '🛍️', '🎉'][o.status];
   const msg = ['Recibimos tu pago.', 'Enviamos tu pedido al local.', `Tiempo estimado: ~${o.eta} min`, `Tiempo estimado: ~${o.eta} min`,
     'Retiralo en la barra con este código.', '¡Que lo disfrutes!'][o.status];
-  const cards = ready ? o.parts.map((pt) => `
+  const cards = ready ? o.parts.map((pt) => pt.status === 'delivered' ? `<div class="pickup-card"><p class="where">${POINTS[pt.point] || ''}</p><p class="muted">✓ Esta parte ya fue entregada</p></div>` : `
     <div class="pickup-card"><p class="muted">Retirá en</p><p class="where">${POINTS[pt.point]}</p>
       ${fakeQr(o.number + pt.code)}<p class="code" aria-label="Código ${pt.code.split('').join(' ')}">${pt.code}</p>
       <p class="muted">Mostrá el QR o decí el código al retirar. Se usa una sola vez.</p></div>`).join('') : '';
@@ -282,16 +282,39 @@ function createOrder() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const code = () => Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
   const maxPrep = Math.max(...state.cart.map((l) => prod(l.pid).prep));
-  orderCounter += 1;
   state.order = {
-    number: '#' + String(orderCounter).padStart(3, '0'), status: 0, rejected: false, finished: false,
-    total: cartTotal(), eta: maxPrep + 3,
-    parts: Object.entries(byPoint).map(([point, items]) => ({ point, items, code: code() })),
+    number: Store.nextNumber(), status: 0, rejected: false, rejectReason: null, finished: false,
+    total: cartTotal(), eta: maxPrep + 3, origin: state.origin, createdAt: Date.now(),
+    parts: Object.entries(byPoint).map(([point, lines]) => ({
+      point, code: code(), status: 'preparing',
+      items: lines.map((l) => ({ name: prod(l.pid).name, qty: l.qty, detail: selText(prod(l.pid), l.sel) })),
+    })),
   };
   state.cart = [];
+  publish();
 }
 
+/* ---------- Sincronización con el panel (demo) ---------- */
+function publish() { if (state.order) Store.upsertOrder(state.order); }
+function syncParts(o) {
+  const st = o.status >= 5 ? 'delivered' : o.status >= 4 ? 'ready' : 'preparing';
+  o.parts.forEach((pt) => { pt.status = st; });
+}
+function applyShared(d) {
+  if (Array.isArray(d.unavailable)) PRODUCTS.forEach((p) => { p.available = !d.unavailable.includes(p.id); });
+  state.paused = !!d.paused;
+}
+Store.onChange((d) => {
+  applyShared(d);
+  if (state.order) {
+    const rec = d.orders.find((o) => o.number === state.order.number);
+    if (rec) { state.order = { ...state.order, ...rec }; state.order.finished = state.order.rejected || state.order.status >= 5; }
+  }
+  render();
+});
+
 function startPayment() {
+  if (state.paused) return;
   const token = ++flowToken;
   state.view = 'paying';
   render();
@@ -301,13 +324,14 @@ function startPayment() {
     state.view = 'tracking';
     render();
     setTimeout(() => {
-      if (token === flowToken && state.order && state.order.status === 0 && !state.order.rejected) { state.order.status = 1; if (state.view === 'tracking') render(); }
+      if (token === flowToken && state.order && state.order.status === 0 && !state.order.rejected) { state.order.status = 1; publish(); if (state.view === 'tracking') render(); }
     }, 1500);
   }, 1400);
 }
 
 function resetAll() {
   flowToken++;
+  Store.reset();
   Object.assign(state, { view: 'menu', cat: 'beer', cart: [], sheet: null, order: null, origin: 'Mesa 5', pay: 'mp' });
   render();
 }
@@ -345,12 +369,12 @@ const actions = {
   'demo-next': () => {
     const o = state.order;
     if (!o || o.rejected || o.status >= 5) { toast('Primero hacé un pedido'); return; }
-    o.status++; if (o.status === 5) o.finished = true; state.view = 'tracking';
+    o.status++; if (o.status === 5) o.finished = true; syncParts(o); publish(); state.view = 'tracking';
   },
   'demo-reject': () => {
     const o = state.order;
     if (!o || o.finished) { toast('Primero hacé un pedido'); return; }
-    o.rejected = true; o.finished = true; state.view = 'tracking';
+    o.rejected = true; o.rejectReason = 'Producto sin disponibilidad'; o.finished = true; publish(); state.view = 'tracking';
   },
   'demo-theme': () => {
     state.theme = (state.theme + 1) % THEMES.length;
@@ -372,4 +396,5 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state.sheet) { state.sheet = null; render(); }
 });
 
+applyShared(Store.read());
 render();
