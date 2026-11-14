@@ -58,3 +58,22 @@ Botón primario (degradado) y secundario, tarjeta de producto, chip de categorí
 - Varios puntos: "Tu pedido se retira en N puntos. Cada parte tiene su propio QR."
 - Rechazo: motivo en lenguaje claro y "Iniciamos el reembolso de $X".
 - Estados: Pago aprobado · Esperando al local · Pedido aceptado · En preparación · Listo para retirar · Entregado.
+
+## 8. Modo oscuro y movimiento (actualización)
+
+**Modo oscuro.** Sigue la preferencia del sistema (`prefers-color-scheme: dark`) y se puede forzar el claro con `data-theme="light"`. Los tokens se redefinen en `:root:not([data-theme="light"])`. El color de texto de acento es `--accent-text`: igual a la marca en claro y más claro en oscuro, para mantener contraste 4.5:1. Cada pantalla se valida con axe (WCAG 2.1 A/AA) también en oscuro.
+
+**Elevación y movimiento.** Tokens `--elev-1`, `--elev-2` y `--ease`. Regla: el movimiento tiene propósito y ocurre una sola vez.
+- La hoja de producto anima solo al abrirse, no al elegir opciones.
+- La barra de carrito rebota solo tras agregar un producto.
+- El cambio de pantalla hace un fundido corto que se retira solo.
+- Seguimiento: barra de avance (`role="progressbar"`), tarjeta de retiro que "respira" y confeti al entregar.
+- Con `prefers-reduced-motion` no queda ninguna animación activa y el confeti se oculta (verificado con `document.getAnimations()`).
+
+**Panel del local.**
+- Envejecimiento del pedido nuevo: normal hasta 2 min, ámbar de 2 a 4 min, rojo desde 4 min (la aceptación vence a los 5).
+- El pedido recién llegado se resalta 6 segundos; los que ya estaban al abrir el panel no cuentan como nuevos.
+- Sonido de aviso: apagado por defecto, lo activa el personal (se recuerda en el navegador) y suena solo ante pedidos nuevos.
+- Columnas con un punto de color por estado y estado vacío con icono.
+
+Pruebas: `apps/e2e/tests/visual-customer.spec.js` y `visual-panel.spec.js`.
