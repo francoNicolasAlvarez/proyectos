@@ -8,7 +8,8 @@
     "start": "node --env-file=../../.env --import tsx src/server.ts",
     "db:setup": "node scripts/db-setup.mjs",
     "db:seed": "node --import tsx scripts/seed-demo.ts",
-    "db:connect-mp": "node scripts/connect-mercadopago.mjs"
+    "db:connect-mp": "node scripts/connect-mercadopago.mjs",
+    "perf": "node --import tsx scripts/perf.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17",

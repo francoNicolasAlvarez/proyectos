@@ -136,6 +136,8 @@ Checks: `total_cents >= 0`; coherencia entre `payment_timing` y los estados de p
 - `tenants (slug)`, `locations (qr_token)`.
 - Parciales: pedidos activos (no entregados ni cancelados) para los conteos de capacidad.
 
+**Índices de claves foráneas (migración 0003, medidos).** PostgreSQL no indexa automáticamente el lado que referencia una clave foránea. Las claves compuestas `(tenant_id, …)` de la cadena pedido → partes → ítems → selecciones, el historial, los tokens de retiro y los reembolsos necesitaban su índice: sin él, "pedidos abiertos de una persona" hacía un Seq Scan de todos los ítems (269 ms con 100.000 pedidos; con el índice, 0,35 ms). Detalle y método en `docs/performance.md`.
+
 ## 6. Retención y datos personales
 
 Datos mínimos del cliente (email, nombre, teléfono opcional). Sin datos de tarjetas. El payload crudo de pagos se conserva por soporte y conciliación; definir plazo de retención antes del lanzamiento. La auditoría no se borra.
