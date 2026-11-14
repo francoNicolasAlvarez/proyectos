@@ -13,7 +13,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 | 5. Backend | **Núcleo de negocio, HTTP, tiempo real y cobro simulado implementados y verificados de punta a punta contra PostgreSQL real**; falta el cobro con Mercado Pago real |
 | 6. Frontend | No iniciado (solo prototipos) |
 | 7. Pagos y QR | Lógica implementada y probada con proveedor simulado; **falta verificar contra el sandbox real de Mercado Pago** |
-| 8. Pruebas | Suite automatizada de 434 pruebas (más 7 de concurrencia opcionales, no ejecutadas), ejecutable en CI |
+| 8. Pruebas | Suite automatizada de 483 pruebas (más 7 de concurrencia opcionales, no ejecutadas), ejecutable en CI |
 | 9. Despliegue | No iniciado |
 
 ## 2. Qué existe
@@ -22,7 +22,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 - **Base de datos** (`apps/api/db`): 36 tablas, claves foráneas compuestas por local, Row-Level Security en las 30 tablas con datos por local (más la política de lectura abierta del directorio de cuentas), tablas de solo inserción (auditoría e historial), restricciones de coherencia entre pago y estado.
 - **Servicios** (`apps/api/src`): crear pedido (idempotente, capacidad, horarios, menú vigente, snapshots de precios); confirmar pago; aceptar, rechazar y cancelar con reembolso; preparar; asignar punto de retiro; retirar con QR de un solo uso; webhook de Mercado Pago (firma, deduplicación, consulta al proveedor, importe verificado); vencimiento de pedidos sin pagar; trabajador de reembolsos con reintentos; autenticación y sesiones; menús por evento; consultas de menú público, cola del local y seguimiento del cliente; consumidor del outbox que genera las notificaciones del cliente por cada hito (pago aprobado, recibido, aceptado, en preparación, listo con punto de retiro, entregado, rechazo o cancelación con motivo, reembolso) y las difunde por canales de usuario y de local.
 - **Prototipos** (`docs/ux/prototype`): app del cliente y panel del local, conectados entre sí por almacenamiento local del navegador.
-- **Pruebas**: 97 (dominio) + 197 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 108 (E2E y accesibilidad con Playwright en móvil y tablet).
+- **Pruebas**: 97 (dominio) + 246 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 108 (E2E y accesibilidad con Playwright en móvil y tablet).
 
 ## 3. Cómo ejecutarlo
 
@@ -69,6 +69,8 @@ Prototipos: abrir `docs/ux/prototype/customer-app/index.html` y `docs/ux/prototy
 - **Control operativo rápido (API):** `PUT /venues/:slug/staff/products/:id/availability`, `…/categories/:id/pause` y `…/ordering` (agotar o reactivar productos, pausar categorías y pausar todos los pedidos con un mensaje para los clientes). Permiso `availability.update` (operador de pedidos, gerente y dueño), auditado, sin ruido si el valor no cambia, y con efecto inmediato en el menú público y en la creación de pedidos.
 - **Sectores de origen y QR (API):** `GET/POST /venues/:slug/staff/locations`, `PUT …/:id`, `POST …/:id/rotate-qr` y `GET …/:id/qr.svg` (imagen SVG imprimible), y la ruta pública `GET /venues/:slug/locations/by-token/:token` que el cliente usa al escanear para precargar el origen. El QR codifica `<app>/v/<local>?s=<token>`; rotarlo invalida el impreso. Solo gerente y dueño; auditado; un QR de un local no resuelve en otro.
 - **Puntos de retiro (API):** `GET/POST /venues/:slug/staff/pickup-points` y `PUT …/:id`. Siempre hay exactamente un punto predeterminado activo (el primero lo es; cambiarlo marca otro y desmarca el anterior; no se puede desactivar ni dejar sin predeterminado), nombres únicos entre activos, auditado, solo gerente y dueño.
+- **Catálogo y equipo (API, 14/11/2026):** categorías (`/staff/categories`), productos con variantes y combos (`/staff/products`: alta, edición parcial, reemplazo de variantes, archivo en lugar de borrado, cambio de categoría y de punto de retiro; cada cambio de precio queda auditado y la respuesta incluye el informe de límites) y equipo del local (`/staff/members`: alta por correo de una persona ya registrada, cambio de rol, desactivación; invariante: nunca se queda sin un dueño activo; solo el dueño). 49 pruebas con la matriz de escenarios y resultados esperados.
+- **Agentes especializados:** `.claude/agents/` define `pasamanos-ui`, `pasamanos-database`, `pasamanos-ux` y `pasamanos-ventas`, con el contexto del proyecto, sus reglas y sus límites.
 - **Migraciones:** ahora hay un sistema real (`db/migrations/NNNN_*.sql` + tabla `schema_migrations`); `db:setup` aplica solo las pendientes y reconoce bases anteriores al registro.
 
 ## 6. Lo que NO está hecho ni verificado

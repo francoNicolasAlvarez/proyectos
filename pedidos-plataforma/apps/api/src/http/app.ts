@@ -9,10 +9,12 @@ import { CANCELLATION_REASONS, InvalidTransitionError, OrderLimitError, PricingE
 import { SESSION_DAYS, authenticate, login, logout, registerUser, roleIn, type AuthUser } from '../auth';
 import { DomainError, withContext, type Database } from '../db';
 import { setCategoryPaused, setOrderingPaused, setProductAvailable } from '../catalog-admin';
+import { createCategory, createProduct, listCategories, listProducts, updateCategory, updateProduct } from '../catalog-service';
 import { buildCheckout } from '../checkout-service';
 import { createLocation, listLocations, locationQrSvg, qrUrlFor, resolveLocationByToken, rotateLocationQr, updateLocation } from '../locations-admin';
 import { confirmLimitsReviewed, getLimitsReport, updateLimits } from '../limits-service';
 import { resolveTenantBySlug } from '../menu';
+import { ROLES, addMember, listMembers, updateMember } from '../staff-admin';
 import { createPickupPoint, listPickupPoints, updatePickupPoint } from '../pickup-points-admin';
 import { listNotifications, markNotificationsRead } from '../notifications';
 import { createOrder, markPartReady, redeemPickup, transitionOrder } from '../order-service';
@@ -52,7 +54,8 @@ const STATUS: Record<string, number> = {
   ORDER_NOT_FOUND: 404, PART_NOT_FOUND: 404, TENANT_NOT_FOUND: 404, TENANT_NOT_ACTIVE: 404, UNKNOWN_ACCOUNT: 404, NO_ACTIVE_MENU: 404,
   EMAIL_TAKEN: 409, ALREADY_USED: 409, IDEMPOTENCY_KEY_REUSED: 409, AMOUNT_MISMATCH: 409,
   PAUSED: 409, CLOSED: 409, CONCURRENT_LIMIT: 409, INTERVAL_LIMIT: 409, PRODUCT_NOT_IN_ACTIVE_MENU: 409,
-  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, PICKUP_POINT_NOT_FOUND: 404, POINT_NAME_TAKEN: 409, DEFAULT_POINT_CANNOT_BE_DEACTIVATED: 409, DEFAULT_POINT_REQUIRED: 409, LOCATION_NOT_FOUND: 404, LOCATION_NAME_TAKEN: 409, PRODUCT_NOT_FOUND: 404, CATEGORY_NOT_FOUND: 404, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
+  RATE_LIMITED: 429, IDEMPOTENCY_KEY_REQUIRED: 400, USER_NOT_FOUND: 404, MEMBER_NOT_FOUND: 404, MEMBER_ALREADY_EXISTS: 409, LAST_OWNER: 409, USER_BLOCKED: 409,
+  PRODUCT_NAME_TAKEN: 409, CATEGORY_NAME_TAKEN: 409, CATEGORY_NOT_EMPTY: 409, PICKUP_POINT_NOT_FOUND: 404, POINT_NAME_TAKEN: 409, DEFAULT_POINT_CANNOT_BE_DEACTIVATED: 409, DEFAULT_POINT_REQUIRED: 409, LOCATION_NOT_FOUND: 404, LOCATION_NAME_TAKEN: 409, PRODUCT_NOT_FOUND: 404, CATEGORY_NOT_FOUND: 404, REFUND_NOT_FOUND: 404, REFUND_NOT_RETRYABLE: 409,
   ORDER_NOT_PAYABLE: 409, PAYMENT_WINDOW_EXPIRED: 409, PAYMENT_ACCOUNT_NOT_CONNECTED: 409,
 };
 
@@ -300,6 +303,65 @@ export async function buildApp(cfg: AppConfig): Promise<FastifyInstance> {
     const { tenant, ctx } = await staff(req, slug, 'locations.manage');
     const svg = await withContext(cfg.db, ctx, (tx) => locationQrSvg(tx, tenant.id, idParam(req), qrUrlOf(slug)));
     return reply.type('image/svg+xml').header('Cache-Control', 'no-store').send(svg);
+  });
+
+  /* ---------- catálogo: categorías, productos, variantes y combos ---------- */
+  const groupSchema = z.object({
+    name: z.string().min(1).max(60), minSelect: z.number().int(), maxSelect: z.number().int(),
+    options: z.array(z.object({ name: z.string().min(1).max(60), priceDeltaCents: z.number().int().optional(), available: z.boolean().optional() }).strict()).max(50),
+  }).strict();
+  const productFields = {
+    name: z.string().min(1).max(120), description: z.string().max(500).nullish(), ingredients: z.string().max(500).nullish(), imageUrl: z.string().url().max(500).nullish(),
+    basePriceCents: z.number().int(), prepMinutes: z.number().int(), kind: z.enum(['simple', 'combo']), pickupPointId: uuid.nullish(), available: z.boolean().optional(),
+  };
+  /** Tras tocar precios se devuelve el informe de límites: avisa si un precio hace inalcanzable un tope (p. ej. combos de más de $12.500). */
+  const withLimitsReport = async (tx: Parameters<typeof getLimitsReport>[0], tenantId: string, body: object) => ({ ...body, limitsIssues: (await getLimitsReport(tx, tenantId)).issues });
+
+  app.get('/venues/:slug/staff/categories', async (req) => {
+    const { tenant, ctx } = await staff(req, (req.params as { slug: string }).slug, 'catalog.manage');
+    return withContext(cfg.db, ctx, (tx) => listCategories(tx, tenant.id, { includeArchived: (req.query as { archived?: string }).archived === '1' }));
+  });
+  app.post('/venues/:slug/staff/categories', async (req, reply) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'catalog.manage');
+    const b = z.object({ name: z.string().min(1).max(60), pickupPointId: uuid.nullish() }).strict().parse(req.body);
+    return reply.code(201).send(await withContext(cfg.db, ctx, (tx) => createCategory(tx, { tenantId: tenant.id, actorUserId: user.id, ...b })));
+  });
+  app.put('/venues/:slug/staff/categories/:id', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'catalog.manage');
+    const b = z.object({ name: z.string().min(1).max(60).optional(), sortOrder: z.number().int().optional(), pickupPointId: uuid.nullish(), archived: z.boolean().optional() }).strict().parse(req.body);
+    return withContext(cfg.db, ctx, (tx) => updateCategory(tx, { tenantId: tenant.id, actorUserId: user.id, id: idParam(req), patch: b }));
+  });
+  app.get('/venues/:slug/staff/products', async (req) => {
+    const { tenant, ctx } = await staff(req, (req.params as { slug: string }).slug, 'catalog.manage');
+    return withContext(cfg.db, ctx, (tx) => listProducts(tx, tenant.id, { includeArchived: (req.query as { archived?: string }).archived === '1' }));
+  });
+  app.post('/venues/:slug/staff/products', async (req, reply) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'catalog.manage');
+    const b = z.object({ categoryId: uuid, ...productFields, groups: z.array(groupSchema).max(20).optional() }).strict().parse(req.body);
+    const { categoryId, groups, ...fields } = b;
+    return reply.code(201).send(await withContext(cfg.db, ctx, async (tx) =>
+      withLimitsReport(tx, tenant.id, await createProduct(tx, { tenantId: tenant.id, actorUserId: user.id, categoryId, fields, groups }))));
+  });
+  app.put('/venues/:slug/staff/products/:id', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'catalog.manage');
+    const b = z.object({ categoryId: uuid.optional(), ...Object.fromEntries(Object.entries(productFields).map(([k, v]) => [k, (v as z.ZodTypeAny).optional()])), archived: z.boolean().optional(), groups: z.array(groupSchema).max(20).optional() }).strict().parse(req.body);
+    return withContext(cfg.db, ctx, async (tx) => withLimitsReport(tx, tenant.id, await updateProduct(tx, { tenantId: tenant.id, actorUserId: user.id, productId: idParam(req), patch: b as never })));
+  });
+
+  /* ---------- equipo del local (solo el dueño) ---------- */
+  app.get('/venues/:slug/staff/members', async (req) => {
+    const { tenant, ctx } = await staff(req, (req.params as { slug: string }).slug, 'staff.manage');
+    return withContext(cfg.db, ctx, (tx) => listMembers(tx, tenant.id));
+  });
+  app.post('/venues/:slug/staff/members', async (req, reply) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'staff.manage');
+    const b = z.object({ email: z.string().email().max(254), role: z.enum(ROLES as unknown as [string, ...string[]]) }).strict().parse(req.body);
+    return reply.code(201).send(await withContext(cfg.db, ctx, (tx) => addMember(tx, { tenantId: tenant.id, actorUserId: user.id, email: b.email, role: b.role as never })));
+  });
+  app.put('/venues/:slug/staff/members/:id', async (req) => {
+    const { tenant, user, ctx } = await staff(req, (req.params as { slug: string }).slug, 'staff.manage');
+    const b = z.object({ role: z.enum(ROLES as unknown as [string, ...string[]]).optional(), active: z.boolean().optional() }).strict().parse(req.body);
+    return withContext(cfg.db, ctx, (tx) => updateMember(tx, { tenantId: tenant.id, actorUserId: user.id, userId: idParam(req), role: b.role as never, active: b.active }));
   });
 
   /* ---------- puntos de retiro ---------- */
