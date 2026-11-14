@@ -2,7 +2,7 @@
 
 Plataforma web (PWA) de pedidos y autoservicio para locales gastronómicos, bares, pubs y eventos: el cliente pide y paga desde su celular y solo se acerca a retirar.
 
-**Estado:** diseño completo, núcleo de negocio y base de datos implementados y probados; falta la capa HTTP y los frontends reales. Ver el [informe de avance](docs/progress-report.md).
+**Estado:** diseño completo, núcleo de negocio y base de datos implementados y probados; la API HTTP está completa para el MVP; faltan los frontends reales (hoy hay prototipos navegables). Ver el [informe de avance](docs/progress-report.md).
 
 ## Documentación
 
@@ -12,6 +12,9 @@ Plataforma web (PWA) de pedidos y autoservicio para locales gastronómicos, bare
 - [Diseño de base de datos](docs/database-design.md)
 - [Diseño UX y sistema de diseño](docs/ux/design-system.md)
 - [Decisiones de arquitectura (ADR)](docs/adr/)
+- [Matriz de escenarios de prueba](docs/test-scenarios.md)
+- [Rendimiento medido](docs/performance.md)
+- [Planes, suscripción y promociones (propuesta)](docs/negocio/planes-y-ventas.md)
 
 ## Estructura
 

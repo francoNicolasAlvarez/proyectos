@@ -13,7 +13,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 | 5. Backend | **Núcleo de negocio, HTTP, tiempo real y cobro simulado implementados y verificados de punta a punta contra PostgreSQL real**; falta el cobro con Mercado Pago real |
 | 6. Frontend | No iniciado (solo prototipos) |
 | 7. Pagos y QR | Lógica implementada y probada con proveedor simulado; **falta verificar contra el sandbox real de Mercado Pago** |
-| 8. Pruebas | Suite automatizada de 521 pruebas (más 7 de concurrencia opcionales, no ejecutadas), ejecutable en CI |
+| 8. Pruebas | Suite automatizada de 552 pruebas (más 7 de concurrencia opcionales, no ejecutadas), ejecutable en CI |
 | 9. Despliegue | No iniciado |
 
 ## 2. Qué existe
@@ -22,7 +22,7 @@ Estado al **13 de noviembre de 2026, 14:30 (Argentina)**. Este documento resume 
 - **Base de datos** (`apps/api/db`): 36 tablas, claves foráneas compuestas por local, Row-Level Security en las 30 tablas con datos por local (más la política de lectura abierta del directorio de cuentas), tablas de solo inserción (auditoría e historial), restricciones de coherencia entre pago y estado.
 - **Servicios** (`apps/api/src`): crear pedido (idempotente, capacidad, horarios, menú vigente, snapshots de precios); confirmar pago; aceptar, rechazar y cancelar con reembolso; preparar; asignar punto de retiro; retirar con QR de un solo uso; webhook de Mercado Pago (firma, deduplicación, consulta al proveedor, importe verificado); vencimiento de pedidos sin pagar; trabajador de reembolsos con reintentos; autenticación y sesiones; menús por evento; consultas de menú público, cola del local y seguimiento del cliente; consumidor del outbox que genera las notificaciones del cliente por cada hito (pago aprobado, recibido, aceptado, en preparación, listo con punto de retiro, entregado, rechazo o cancelación con motivo, reembolso) y las difunde por canales de usuario y de local.
 - **Prototipos** (`docs/ux/prototype`): app del cliente y panel del local, conectados entre sí por almacenamiento local del navegador.
-- **Pruebas**: 97 (dominio) + 246 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 146 (E2E, accesibilidad, modo oscuro y movimiento reducido con Playwright en móvil y tablet).
+- **Pruebas**: 128 (dominio, incluye planes y promociones) + 246 y 32 (API y base de datos, contra PostgreSQL real vía PGlite) + 146 (E2E, accesibilidad, modo oscuro y movimiento reducido con Playwright en móvil y tablet).
 
 ## 3. Cómo ejecutarlo
 
