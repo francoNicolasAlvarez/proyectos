@@ -49,7 +49,7 @@ Cuidado de producto: la promoción baja lo que cobra el local y lo que se paga e
 ## 4. Preguntas de negocio que conviene validar
 
 Ninguna tiene respuesta en el repositorio; son hipótesis para contrastar con locales:
-1. ¿Se cobra suscripción fija, comisión por pedido, o ambas? Esto cambia el diseño de facturación.
+1. Ya decidido: el modelo es **suscripción fija por local** (sin comisión por pedido). Falta definir los montos por plan y la periodicidad (mensual o anual).
 2. ¿Qué parte del costo del medio de pago (comisión de Mercado Pago) absorbe el local y cuál el cliente? Verificar las tarifas vigentes en la fuente oficial antes de calcular márgenes.
 3. ¿Los impuestos y la facturación electrónica los gestiona el local o la plataforma? Requiere asesoramiento contable.
 4. ¿Los topes del plan gratuito son suficientes para que el local vea valor, pero lo bastante ajustados para motivar la mejora?
@@ -59,6 +59,7 @@ Métricas a medir cuando haya locales reales: locales activos, pedidos por local
 
 ## 5. Decisiones pendientes para integrar
 
+- Montos por plan y periodicidad (solo el negocio puede definirlos).
 - Tabla de suscripciones por local (plan, estado, fechas) y su migración.
 - Dónde se hace cumplir: al crear un pedido (`canReceiveOrders`) y al administrar catálogo, personal, puntos y sectores (`canAdd`, `hasFeature`).
 - Cómo se cobra la suscripción en sí (distinto del cobro de pedidos a clientes).
