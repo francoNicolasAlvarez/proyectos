@@ -53,7 +53,11 @@ const LIMITS = { maxTotal: 100000, maxIndividual: 20, maxCombos: 8 };
 const fmtNum = (n) => new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n);
 const isCombo = (p) => p.cat === 'combo';
 
-const state = { view: 'menu', cat: 'beer', cart: [], origin: 'Mesa 5', sheet: null, order: null, pay: 'mp', theme: 0, paused: false };
+const state = { view: 'menu', cat: 'beer', cart: [], origin: 'Mesa 5', sheet: null, order: null, pay: 'mp', theme: 0, paused: false, lastView: null, animateSheet: false, bumpCart: false };
+
+/* Confeti de CSS puro para la entrega (se oculta con prefers-reduced-motion). */
+const CONFETTI = '<div class="confetti" aria-hidden="true">' + Array.from({ length: 14 }, (_, i) => `<i style="--i:${i}"></i>`).join('') + '</div>';
+const EMPTY_CART_SVG = '<svg class="empty-art" viewBox="0 0 120 100" role="img" aria-label="Carrito vacío"><defs><linearGradient id="eg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--brand)"/><stop offset="1" stop-color="var(--brand-2)"/></linearGradient></defs><ellipse cx="60" cy="90" rx="38" ry="6" fill="var(--surface-2)"/><path d="M22 30h10l8 36h42l8-28H38" fill="none" stroke="url(#eg)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="46" cy="78" r="6" fill="url(#eg)"/><circle cx="78" cy="78" r="6" fill="url(#eg)"/><path d="M52 16l4 8 8 1-6 6 2 8-8-4-8 4 2-8-6-6 8-1z" fill="var(--brand-2)" opacity=".35"/></svg>';
 let flowToken = 0;
 let toastTimer = null;
 
@@ -175,7 +179,7 @@ function viewMenu() {
   <section class="list" aria-label="Productos">
     ${list.map((p) => `
       <article class="card ${p.available ? '' : 'off'}">
-        <div class="thumb" aria-hidden="true">${p.emoji}</div>
+        <div class="thumb t-${p.cat}" aria-hidden="true">${p.emoji}</div>
         <div class="body">
           <h3>${p.name}</h3>
           <p>${p.desc}</p>
@@ -185,7 +189,7 @@ function viewMenu() {
       </article>`).join('')}
   </section>
   <footer class="footer-brand"><img src="../../../../packages/ui/assets/logo-mark.svg" alt=""> Hecho con Pasamanos</footer>
-  ${cartCount() ? `<button class="cartbar${limitsOk() ? '' : ' over'}" data-a="go-cart"><span>${limitsOk() ? '' : '⚠ '}Ver carrito (${cartCount()})</span><span>${fmt(cartTotal())}</span></button>` : ''}`;
+  ${cartCount() ? `<button class="cartbar${limitsOk() ? '' : ' over'}${state.bumpCart ? ' bump' : ''}" data-a="go-cart"><span>${limitsOk() ? '' : '⚠ '}Ver carrito (${cartCount()})</span><span>${fmt(cartTotal())}</span></button>` : ''}`;
 }
 
 function viewCart() {
@@ -218,7 +222,7 @@ function viewCart() {
       </div>
       <p></p>
       <button class="btn" data-a="go-pay" ${state.paused || !limitsOk() ? 'disabled' : ''}>${state.paused ? 'Pedidos pausados' : !limitsOk() ? 'Revisá los límites del pedido' : 'Continuar al pago'}</button>`
-      : `<div class="center" style="padding:48px 0"><p>Tu carrito está vacío.</p><button class="btn secondary" data-a="go-menu">Ver el menú</button></div>`}
+      : `<div class="center empty">${EMPTY_CART_SVG}<p>Tu carrito está vacío.</p><p class="muted">Sumá algo rico del menú y pedilo sin hacer fila.</p><button class="btn secondary" data-a="go-menu">Ver el menú</button></div>`}
   </div>`;
 }
 
@@ -260,13 +264,14 @@ function viewTracking() {
   const msg = ['Recibimos tu pago.', 'Enviamos tu pedido al local.', `Tiempo estimado: ~${o.eta} min`, `Tiempo estimado: ~${o.eta} min`,
     'Retiralo en la barra con este código.', '¡Que lo disfrutes!'][o.status];
   const cards = ready ? o.parts.map((pt) => pt.status === 'delivered' ? `<div class="pickup-card"><p class="where">${POINTS[pt.point] || ''}</p><p class="muted">✓ Esta parte ya fue entregada</p></div>` : `
-    <div class="pickup-card"><p class="muted">Retirá en</p><p class="where">${POINTS[pt.point]}</p>
+    <div class="pickup-card glow"><p class="muted">Retirá en</p><p class="where">${POINTS[pt.point]}</p>
       ${fakeQr(o.number + pt.code)}<p class="code" aria-label="Código ${pt.code.split('').join(' ')}">${pt.code}</p>
       <p class="muted">Mostrá el QR o decí el código al retirar. Se usa una sola vez.</p></div>`).join('') : '';
   return `
   <div class="topbar"><button class="back" data-a="go-menu" aria-label="Volver al menú">←</button><h2>Pedido ${o.number}</h2></div>
-  <div class="status-hero"><div style="font-size:48px" aria-hidden="true">${emoji}</div><h2>${STEPS[o.status]}</h2><p>${msg}</p></div>
+  <div class="status-hero${done ? ' done' : ''}">${done ? CONFETTI : ''}<div class="emoji${done ? '' : ' float'}" aria-hidden="true">${emoji}</div><h2>${STEPS[o.status]}</h2><p>${msg}</p></div>
   <div class="pad">
+    <div class="progress" role="progressbar" aria-label="Avance del pedido" aria-valuemin="0" aria-valuemax="5" aria-valuenow="${o.status}"><span style="width:${Math.round((o.status / 5) * 100)}%"></span></div>
     ${ready && o.parts.length > 1 ? '<div class="notice pickup">Tu pedido se retira en varios puntos. Cada parte tiene su propio QR.</div><p></p>' : ''}
     ${cards}
     ${done ? '<button class="btn" data-a="new-order">Hacer otro pedido</button>' : `
@@ -280,10 +285,11 @@ function viewTracking() {
 
 function renderSheet() {
   const s = state.sheet, el = $('#sheet');
+  const enter = state.animateSheet ? ' enter' : ''; state.animateSheet = false;
   if (!s) { el.innerHTML = ''; return; }
   if (s.kind === 'origin') {
-    el.innerHTML = `<div class="backdrop" data-a="close-sheet"></div>
-      <div class="sheet" role="dialog" aria-modal="true" aria-label="¿Desde dónde pedís?">
+    el.innerHTML = `<div class="backdrop${enter}" data-a="close-sheet"></div>
+      <div class="sheet${enter}" role="dialog" aria-modal="true" aria-label="¿Desde dónde pedís?">
         <h2>¿Desde dónde pedís?</h2><p class="desc">Es solo para que el local sepa de dónde viene el pedido. Siempre se retira en la barra.</p>
         ${ORIGINS.map((x) => `<button class="radio" role="radio" aria-checked="${state.origin === x}" data-a="origin-set" data-v="${x}"><span class="dot"></span><span class="grow">${x}</span></button>`).join('')}
         <button class="radio" role="radio" aria-checked="${state.origin === null}" data-a="origin-set" data-v=""><span class="dot"></span><span class="grow">Estoy afuera / prefiero no indicar</span></button>
@@ -294,8 +300,8 @@ function renderSheet() {
   const sel = s.sel;
   const valid = p.groups.every((g) => (sel[g.id] || []).length >= g.min);
   const unit = unitPrice(p, sel);
-  el.innerHTML = `<div class="backdrop" data-a="close-sheet"></div>
-    <div class="sheet" role="dialog" aria-modal="true" aria-label="${p.name}">
+  el.innerHTML = `<div class="backdrop${enter}" data-a="close-sheet"></div>
+    <div class="sheet${enter}" role="dialog" aria-modal="true" aria-label="${p.name}">
       <h2>${p.name}</h2><p class="desc">${p.desc}</p>
       <p class="meta"><span>⏱ ~${p.prep} min</span><span>Contiene: ${p.ingredients}</span><span>Retiro: ${POINTS[p.point]}</span></p>
       ${p.groups.map((g) => `<div class="group"><div class="group-head"><strong>${g.name}</strong>
@@ -310,10 +316,17 @@ function renderSheet() {
     </div>`;
 }
 
+let enterTimer = null;
 function render() {
-  const v = state.view;
-  $('#app').innerHTML = v === 'menu' ? viewMenu() : v === 'cart' ? viewCart() : v === 'pay' ? viewPay() : v === 'paying' ? viewPaying() : viewTracking();
+  const v = state.view, app = $('#app');
+  const changed = v !== state.lastView; state.lastView = v;
+  app.innerHTML = v === 'menu' ? viewMenu() : v === 'cart' ? viewCart() : v === 'pay' ? viewPay() : v === 'paying' ? viewPaying() : viewTracking();
+  if (changed) {   // la animación de entrada solo corre al cambiar de pantalla, no en cada redibujado
+    app.classList.remove('view-enter'); void app.offsetWidth; app.classList.add('view-enter');
+    clearTimeout(enterTimer); enterTimer = setTimeout(() => app.classList.remove('view-enter'), 450);
+  }
   renderSheet();
+  state.bumpCart = false;
 }
 
 /* ---------- Lógica ---------- */
@@ -387,7 +400,7 @@ const actions = {
   cat: (d) => { state.cat = d.v; },
   open: (d) => {
     const p = prod(d.v);
-    if (!p.groups.length) { addToCart(p.id, {}, 1); toast(limitsOk() ? `${p.name} agregado` : 'Tu pedido supera el límite: revisalo en el carrito'); } else state.sheet = { kind: 'product', pid: p.id, sel: {}, qty: 1 };
+    if (!p.groups.length) { state.bumpCart = true; addToCart(p.id, {}, 1); toast(limitsOk() ? `${p.name} agregado` : 'Tu pedido supera el límite: revisalo en el carrito'); } else { state.sheet = { kind: 'product', pid: p.id, sel: {}, qty: 1 }; state.animateSheet = true; }
   },
   opt: (d) => {
     const s = state.sheet, p = prod(s.pid), g = p.groups.find((x) => x.id === d.g);
@@ -399,9 +412,9 @@ const actions = {
   },
   'sheet-inc': () => { state.sheet.qty = Math.min(20, state.sheet.qty + 1); },
   'sheet-dec': () => { state.sheet.qty = Math.max(1, state.sheet.qty - 1); },
-  'sheet-add': () => { const s = state.sheet; addToCart(s.pid, s.sel, s.qty); toast(limitsOk() ? `${prod(s.pid).name} agregado` : 'Tu pedido supera el límite: revisalo en el carrito'); state.sheet = null; },
+  'sheet-add': () => { state.bumpCart = true; const s = state.sheet; addToCart(s.pid, s.sel, s.qty); toast(limitsOk() ? `${prod(s.pid).name} agregado` : 'Tu pedido supera el límite: revisalo en el carrito'); state.sheet = null; },
   'close-sheet': () => { state.sheet = null; },
-  'origin-open': () => { state.sheet = { kind: 'origin' }; },
+  'origin-open': () => { state.sheet = { kind: 'origin' }; state.animateSheet = true; },
   'origin-set': (d) => { state.origin = d.v || null; state.sheet = null; },
   'go-menu': () => { state.view = 'menu'; },
   'go-cart': () => { state.view = 'cart'; },

@@ -60,7 +60,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: flex; gap: 10px; align-items: center; justify-content: space-between; font-size: 14px;
 }
 .origin-chip small { display: block; color: var(--muted); font-size: 12px; }
-.link-btn { background: none; border: 0; color: var(--brand); font-weight: 600; padding: 8px; min-height: 44px; }
+.link-btn { background: none; border: 0; color: var(--accent-text); font-weight: 600; padding: 8px; min-height: 44px; }
 
 .order-banner {
   margin: 0 16px 8px; padding: 12px; border-radius: 12px; border: 0; width: calc(100% - 32px);
@@ -192,7 +192,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .pickup-card {
   border: 2px solid var(--brand); border-radius: 20px; padding: 16px; margin-bottom: 12px; text-align: center; background: var(--bg);
 }
-.pickup-card .where { font-size: 20px; font-weight: 800; color: var(--brand); margin: 0; }
+.pickup-card .where { font-size: 20px; font-weight: 800; color: var(--accent-text); margin: 0; }
 .pickup-card svg { width: 180px; height: 180px; margin: 12px auto; display: block; }
 .code { font-size: 32px; letter-spacing: 0.2em; font-weight: 800; margin: 0; font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); font-size: 13px; }
@@ -228,3 +228,93 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .limits .notice { margin-top: 10px; display: block; }
 .cartbar.over { background: #b3261e; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ================================================================
+   Mejoras visuales: tokens de movimiento y elevación, modo oscuro,
+   animaciones con propósito y estados vacíos. Todo el movimiento se
+   desactiva con prefers-reduced-motion (al final de este bloque).
+   ================================================================ */
+:root {
+  --accent-text: var(--brand);               /* color de texto de acento: se aclara en modo oscuro */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --elev-1: 0 1px 2px rgba(36, 40, 90, 0.08);
+  --elev-2: 0 8px 24px rgba(36, 40, 90, 0.12);
+}
+
+/* Modo oscuro (sigue la preferencia del sistema; [data-theme="light"] lo fuerza claro) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1224; --surface: #171b36; --surface-2: #222752;
+    --text: #eef0ff; --muted: #aab0d6; --border: #2c3263;
+    --ok: #7fe0aa; --ok-bg: #12301f; --warn: #ffd48a; --warn-bg: #3a2c0b; --err: #ffa59e; --err-bg: #3d1613;
+    --accent-text: #aab8ff;
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4); --elev-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
+
+/* Cabecera del local con un fondo suave del color de su marca */
+.venue-head { background: linear-gradient(135deg, var(--surface-2), transparent 70%); border-radius: 0 0 24px 24px; }
+
+/* Tarjetas de producto: relieve y respuesta al toque */
+.card { box-shadow: var(--elev-1); transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease); }
+.card:active { transform: scale(0.985); box-shadow: none; }
+.add { transition: transform 0.12s var(--ease), filter 0.12s; box-shadow: 0 4px 10px rgba(103, 65, 217, 0.35); }
+.add:active { transform: scale(0.9); }
+.btn { transition: transform 0.12s var(--ease), filter 0.12s, box-shadow 0.12s; box-shadow: 0 6px 14px rgba(52, 81, 209, 0.28); }
+.btn:active { transform: scale(0.985); filter: brightness(0.95); }
+.btn.secondary, .btn[disabled] { box-shadow: none; }
+.qty button:active { background: var(--surface-2); border-radius: 50%; }
+.tab { transition: background 0.15s, color 0.15s; }
+
+/* Miniaturas con un tono por categoría (con transparencia: funcionan en claro y oscuro) */
+.thumb.t-beer { background: linear-gradient(135deg, rgba(245, 166, 35, 0.28), rgba(245, 166, 35, 0.08)); }
+.thumb.t-drinks { background: linear-gradient(135deg, rgba(231, 76, 125, 0.25), rgba(231, 76, 125, 0.07)); }
+.thumb.t-soft { background: linear-gradient(135deg, rgba(46, 204, 113, 0.25), rgba(46, 204, 113, 0.07)); }
+.thumb.t-food { background: linear-gradient(135deg, rgba(230, 126, 34, 0.25), rgba(230, 126, 34, 0.07)); }
+.thumb.t-combo { background: linear-gradient(135deg, rgba(103, 65, 217, 0.3), rgba(52, 81, 209, 0.1)); }
+
+/* Entrada de pantalla y de hoja inferior (solo al abrir, ver app.js) */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes sheet-up { from { transform: translate(-50%, 100%); } to { transform: translate(-50%, 0); } }
+.view-enter .card, .view-enter .line, .view-enter .pickup-card, .view-enter .notice, .view-enter .limits, .view-enter .radio { animation: fade-up 0.32s var(--ease) both; }
+.view-enter .card:nth-child(2) { animation-delay: 40ms; } .view-enter .card:nth-child(3) { animation-delay: 80ms; } .view-enter .card:nth-child(4) { animation-delay: 120ms; }
+#sheet .backdrop.enter { animation: fade-in 0.2s ease both; }
+#sheet .sheet.enter { animation: sheet-up 0.3s var(--ease) both; }
+#sheet .sheet::before { content: ""; display: block; width: 44px; height: 5px; border-radius: 3px; background: var(--border); margin: -8px auto 12px; }
+
+/* Barra de carrito: rebote al agregar */
+@keyframes bump { 0% { transform: translateX(-50%) scale(1); } 40% { transform: translateX(-50%) scale(1.04); } 100% { transform: translateX(-50%) scale(1); } }
+.cartbar.bump { animation: bump 0.35s var(--ease); }
+
+/* Estado vacío */
+.empty { padding: 36px 16px; }
+.empty-art { width: 140px; height: auto; margin-bottom: 8px; }
+.empty p { margin: 4px 0; }
+
+/* Seguimiento: barra de avance, emoji que flota, tarjeta de retiro que respira, celebración al entregar */
+.progress { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 4px 0 8px; }
+.progress span { display: block; height: 100%; border-radius: 999px; background: var(--brand-grad); transition: width 0.6s var(--ease); }
+.status-hero .emoji { font-size: 48px; line-height: 1.2; }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.status-hero .emoji.float { animation: float 2.6s ease-in-out infinite; }
+@keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(103, 65, 217, 0.4); } 50% { box-shadow: 0 0 0 10px rgba(103, 65, 217, 0); } }
+.pickup-card.glow { animation: glow 2.4s ease-in-out infinite; }
+.status-hero.done { position: relative; overflow: hidden; }
+.confetti { position: absolute; inset: 0; pointer-events: none; }
+.confetti i { position: absolute; top: 0; left: calc(var(--i) * 7%); width: 8px; height: 14px; border-radius: 2px; opacity: 0; animation: confetti 1.8s var(--ease) calc(var(--i) * 70ms) 1 both; }
+.confetti i:nth-child(3n) { background: #3451d1; } .confetti i:nth-child(3n+1) { background: #6741d9; } .confetti i:nth-child(3n+2) { background: #f5a623; }
+@keyframes confetti { 0% { transform: translateY(-14px) rotate(0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(150px) rotate(420deg); opacity: 0; } }
+
+/* Aviso temporal más legible */
+#toast { box-shadow: var(--elev-2); }
+
+/* Foco más visible en modo oscuro */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) :focus-visible { outline-color: #aab8ff; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .confetti { display: none; }
+}

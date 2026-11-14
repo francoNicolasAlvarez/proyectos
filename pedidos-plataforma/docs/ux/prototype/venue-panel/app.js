@@ -15,6 +15,28 @@ const $ = (s) => document.querySelector(s);
 const ui = { modal: null, scan: { code: '', result: null, found: null } };
 let data = Store.read();
 
+/* Pedidos nuevos: se resaltan y (si el personal lo activó) suena una alerta. Los que ya estaban al cargar la página no cuentan como nuevos. */
+const seen = new Set(data.orders.map((o) => o.number));
+const freshUntil = new Map();   // resalte visible unos segundos aunque el tablero se redibuje
+let soundOn = false;
+try { soundOn = localStorage.getItem('pasamanos.panel.sound') === '1'; } catch (e) { /* sin almacenamiento */ }
+let audioCtx = null;
+window.__beepCount = 0;   // contador visible para las pruebas
+function beep() {
+  window.__beepCount++;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.0001;
+    o.connect(g); g.connect(audioCtx.destination);
+    const t = audioCtx.currentTime;
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    o.start(t); o.stop(t + 0.4);
+  } catch (e) { /* el navegador puede bloquear el audio hasta que el usuario interactúe */ }
+}
+/* Envejecimiento: la aceptación vence a los 5 minutos, así que el pedido se pone ámbar a los 2 y rojo a los 4. */
+const ageClass = (createdAt) => { const s = (Date.now() - createdAt) / 1000; return s > 240 ? 'age-late' : s > 120 ? 'age-warn' : ''; };
+
 const unavailable = () => (Array.isArray(data.unavailable) ? data.unavailable : DEFAULT_UNAVAILABLE);
 const ago = (ts) => { const m = Math.floor((Date.now() - ts) / 60000); return m < 1 ? 'hace instantes' : `hace ${m} min`; };
 const mmss = (s) => `${String(Math.floor(Math.abs(s) / 60)).padStart(2, '0')}:${String(Math.abs(s) % 60).padStart(2, '0')}`;
@@ -42,7 +64,9 @@ function orderCard(o) {
     actions = o.parts.map((p) => `<div class="row"><span>${pointName(p.point)}</span><span class="tag ${p.status === 'delivered' ? 'ok' : 'warn'}">${p.status === 'delivered' ? 'Entregado ✓' : 'Esperando retiro'}</span></div>`).join('')
       + `<div class="btns"><button class="btn sec" data-a="scan">Escanear entrega</button></div>`;
   }
-  return `<article class="ocard ${o.status === 1 ? 'new' : ''}" data-n="${o.number}">
+  if (o.status === 1 && !seen.has(o.number) && !freshUntil.has(o.number)) freshUntil.set(o.number, Date.now() + 6000);
+  const fresh = o.status === 1 && (freshUntil.get(o.number) || 0) > Date.now();
+  return `<article class="ocard ${o.status === 1 ? 'new ' + ageClass(o.createdAt) : ''}${fresh ? ' fresh' : ''}" data-n="${o.number}" data-created="${o.status === 1 ? o.createdAt : ''}">
     <header><strong>${o.number}</strong><span class="tag">${o.origin ? 'Origen: ' + o.origin : 'Sin origen'}</span></header>
     <p class="meta">${ago(o.createdAt)} · <span class="tag ok">Pago aprobado</span> · ~${o.eta} min</p>
     <ul>${items.map((it) => `<li>${it.qty}× ${it.name}${it.detail ? `<small>${it.detail}</small>` : ''}</li>`).join('')}</ul>
@@ -58,9 +82,15 @@ function render() {
   ];
   $('#board').innerHTML = cols.map(([name, list]) => `<section class="col" aria-label="${name}">
     <h2>${name} <span class="count">${list.length}</span></h2>
-    ${list.length ? list.sort((a, b) => a.createdAt - b.createdAt).map(orderCard).join('') : '<p class="empty">Sin pedidos</p>'}</section>`).join('');
+    ${list.length ? list.sort((a, b) => a.createdAt - b.createdAt).map(orderCard).join('') : '<p class="empty"><span aria-hidden="true">☕</span>Sin pedidos</p>'}</section>`).join('');
   const done = data.orders.filter((o) => o.status === 5).length, rej = data.orders.filter((o) => o.rejected).length;
   $('#summary').textContent = `Entregados: ${done} · Rechazados: ${rej}`;
+  const hasFresh = vis.some((o) => o.status === 1 && !seen.has(o.number));
+  vis.forEach((o) => seen.add(o.number));
+  if (hasFresh && soundOn) beep();
+  const sb = $('#sound-btn');
+  sb.setAttribute('aria-pressed', String(soundOn));
+  sb.textContent = soundOn ? '🔔 Sonido activado' : '🔕 Sonido desactivado';
   const pb = $('#pause-btn');
   pb.textContent = data.paused ? 'Reanudar pedidos' : 'Pausar pedidos';
   pb.setAttribute('aria-pressed', String(!!data.paused));
@@ -151,6 +181,7 @@ const actions = {
   avail: () => { ui.modal = { kind: 'avail' }; },
   toggle: (d) => { const cur = unavailable(); save((s) => { s.unavailable = cur.includes(d.v) ? cur.filter((x) => x !== d.v) : [...cur, d.v]; }); },
   pause: () => { save((s) => { s.paused = !s.paused; }); },
+  sound: () => { soundOn = !soundOn; try { localStorage.setItem('pasamanos.panel.sound', soundOn ? '1' : '0'); } catch (e) { /* nada */ } if (soundOn) beep(); },
   scan: () => { ui.scan = { code: '', result: null, found: null }; ui.modal = { kind: 'scan' }; },
   validate: () => { validate($('#code').value.trim().toUpperCase()); },
   'confirm-delivery': () => {
@@ -192,6 +223,11 @@ setInterval(() => {
     const left = Math.round((+el.dataset.deadline - Date.now()) / 1000);
     el.textContent = (left < 0 ? '-' : '') + mmss(left);
     el.classList.toggle('late', left < 0);
+  });
+  document.querySelectorAll('.ocard[data-created]').forEach((el) => {
+    if (!el.dataset.created) return;
+    const c = ageClass(+el.dataset.created);
+    el.classList.toggle('age-warn', c === 'age-warn'); el.classList.toggle('age-late', c === 'age-late');
   });
 }, 1000);
 
