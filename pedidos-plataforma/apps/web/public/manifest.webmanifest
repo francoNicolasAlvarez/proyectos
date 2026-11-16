@@ -1,0 +1,11 @@
+{
+  "name": "Pasamanos",
+  "short_name": "Pasamanos",
+  "description": "Pedí y pagá desde tu celular, retirá en la barra.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3451d1",
+  "lang": "es",
+  "icons": [{ "src": "/logo-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

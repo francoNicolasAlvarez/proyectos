@@ -13,6 +13,7 @@ Plataforma web (PWA) de pedidos y autoservicio para locales gastronómicos, bare
 - [Diseño UX y sistema de diseño](docs/ux/design-system.md)
 - [Decisiones de arquitectura (ADR)](docs/adr/)
 - [Matriz de escenarios de prueba](docs/test-scenarios.md)
+- [Frontend (app del cliente)](docs/frontend.md)
 - [Rendimiento medido](docs/performance.md)
 - [Planes, suscripción y promociones (propuesta)](docs/negocio/planes-y-ventas.md)
 
@@ -20,7 +21,8 @@ Plataforma web (PWA) de pedidos y autoservicio para locales gastronómicos, bare
 
 ```
 apps/api            servicios de negocio, migraciones y pruebas contra PostgreSQL real
-apps/e2e            pruebas E2E y de accesibilidad (Playwright)
+apps/web            app del cliente (React + Vite + TypeScript, PWA)
+apps/e2e            pruebas E2E y de accesibilidad (Playwright): prototipos y app real
 packages/shared     dominio puro: estados, precios, partes de retiro, capacidad, permisos
 packages/ui         logo y recursos de marca
 docs/ux/prototype   prototipos navegables del cliente y del panel del local
@@ -47,6 +49,16 @@ recorrer todo el flujo sin Mercado Pago. El servidor se niega a arrancar así co
 Para probar con Mercado Pago real: poner `MP_TEST_ACCESS_TOKEN` en `.env`, ejecutar `pnpm run db:connect-mp` y arrancar con
 `PAYMENTS_MODE=mercadopago` y `PUBLIC_API_URL` apuntando a una dirección pública (un túnel), configurada también como URL de
 notificaciones en la aplicación de Mercado Pago. Creación del cobro, pago, aviso y reembolso reales se verificaron con cuentas de prueba (ver `docs/progress-report.md`); la validación de la firma con la clave secreta real todavía no.
+
+## App del cliente (apps/web)
+
+```
+pnpm --filter @pasamanos/api start        # API en :3000 (necesita .env y PostgreSQL local)
+pnpm --filter @pasamanos/web dev          # app en http://localhost:5173 (reenvía /api a la API)
+pnpm --filter @pasamanos/e2e test:web     # E2E de la app real: levanta una API de prueba en memoria, sin .env
+```
+
+Detalles y estado en [docs/frontend.md](docs/frontend.md).
 
 ## Ver los prototipos
 
